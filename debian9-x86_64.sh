@@ -96,17 +96,9 @@ if test -f /etc/os-release ; then
 else
 	. /usr/lib/os-release
 fi
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" != "9" ] && [ "$VERSION_ID" != "10" ] && [ "$VERSION_ID" != "11" ]; then
-	echo "This script only work with Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
-	exit 1
-elif [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "18.04" ] && [ "$VERSION_ID" != "19.04" ] && [ "$VERSION_ID" != "20.04" ] && [ "$VERSION_ID" != "22.04" ]; then
-	echo "This script only work with Ubuntu 18.04, 19.04, 20.04 or 22.04"
-	echo "Use debian when possible"
-	exit 1
-elif [ "$ID" != "debian" ] && [ "$ID" != "ubuntu" ]; then
-	echo "This script only work with Ubuntu 18.04, Ubuntu 19.04, Ubutun 20.04, Ubuntu 22.04, Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
-	echo "Use Debian when possible"
-	exit 1
+if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "11" ]; then
+    echo "This script only works with Debian Bullseye (11.x)"
+    exit 1
 fi
 
 echo "Check architecture..."
@@ -193,28 +185,6 @@ rm -f /var/cache/apt/archives/lock
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server
 
-#if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_DEBIAN" = "yes" ] && [ "$update" = "0" ]; then
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Debian 9 Stretch to Debian 10 Buster"
-	apt-get -y -f --force-yes upgrade
-	apt-get -y -f --force-yes dist-upgrade
-	sed -i 's:stretch:buster:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="10"
-fi
-if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Ubuntu 18.04 to Ubuntu 20.04"
-	apt-get -y -f --force-yes upgrade
-	apt-get -y -f --force-yes dist-upgrade
-	sed -i 's:bionic:focal:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="20.04"
-fi
-
 # Add OpenMPTCProuter repo
 echo "Add OpenMPTCProuter repo..."
 if [ "$CHINA" = "yes" ]; then
@@ -269,22 +239,6 @@ else
 	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
 fi
 
-#apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
-if [ "$ID" = "debian" ]; then
-	if [ "$VERSION_ID" = "9" ]; then
-		#echo 'deb http://dl.bintray.com/cpaasch/deb jessie main' >> /etc/apt/sources.list
-		echo 'deb http://deb.debian.org/debian stretch-backports main' > /etc/apt/sources.list.d/stretch-backports.list
-	fi
-	# Add buster-backports repo
-	echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/buster-backports.list
-elif [ "$ID" = "ubuntu" ]; then
-	echo 'deb http://archive.ubuntu.com/ubuntu bionic-backports main' > /etc/apt/sources.list.d/bionic-backports.list
-	echo 'deb http://archive.ubuntu.com/ubuntu bionic universe' > /etc/apt/sources.list.d/bionic-universe.list
-	[ "$VERSION_ID" = "22.04" ] && {
-		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32
-		echo 'deb http://old-releases.ubuntu.com/ubuntu impish main universe' > /etc/apt/sources.list.d/impish-universe.list
-	}
-fi
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
