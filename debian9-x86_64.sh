@@ -80,6 +80,18 @@ export DEBIAN_FRONTEND=noninteractive
 
 # --- begin: install omr-vps-admin from your GitHub asset ---
 ADMIN_DEB_URL="${ADMIN_DEB_URL:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/omr-vps-admin/omr-vps-admin_0.3+20220827_all.deb}"
+V2RAY_DEB_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/v2ray-4.43.0-amd64.deb"
+
+install_v2ray_from_url() {
+    local url="${V2RAY_DEB_URL}"
+    local deb="/tmp/$(basename \"$url\")"
+    echo "Downloading v2ray from: $url"
+    curl -fsSL --retry 3 --retry-delay 2 -o "$deb" "$url" || wget -qO "$deb" "$url"
+    [ -s "$deb" ] || { echo "ERROR: download failed ($url)"; return 1; }
+    dpkg -i "$deb" || { apt-get -f -y install && dpkg -i "$deb"; }
+    rm -f "$deb"
+    echo "v2ray 4.43.0 installed from custom URL."
+}
 
 install_omr_admin_from_url() {
     local url="${ADMIN_DEB_URL}"
@@ -93,7 +105,6 @@ install_omr_admin_from_url() {
     rm -f "$deb"
     echo "omr-vps-admin installed from custom URL."
 }
-# --- end: install omr-vps-admin from your GitHub asset ---
 
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
@@ -754,25 +765,27 @@ if systemctl -q is-active v2ray.service; then
 fi
 
 if [ "$V2RAY" = "yes" ]; then
-	#apt-get -y -o Dpkg::Options::="--force-overwrite" install v2ray
-	if [ "$SOURCES" = "yes" ]; then
-		wget -O /tmp/v2ray-${V2RAY_VERSION}-amd64.deb ${VPSURL}/debian/v2ray-${V2RAY_VERSION}-amd64.deb
-		dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
-		rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
-	else
-		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
+	# Installa la tua 4.43.0 dal tuo GitHub; se fallisce, prova la candidate dal repo OMR
+	if ! install_v2ray_from_url; then
+		echo "Fallback: installo v2ray dal repo (candidate)"
+		apt-get -y install v2ray
 	fi
+
 	if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
 		sed -i "s:V2RAY_UUID:$V2RAY_UUID:g" /etc/v2ray/v2ray-server.json
 	fi
+
 	rm -f /etc/v2ray/config.json
 	ln -s /etc/v2ray/v2ray-server.json /etc/v2ray/config.json
+
 	if [ -f /etc/systemd/system/v2ray.service.dpkg-dist ]; then
 		mv -f /etc/systemd/system/v2ray.service.dpkg-dist /etc/systemd/system/v2ray.service
 	fi
+
 	systemctl daemon-reload
 	systemctl enable v2ray.service
+
 	if [ "$UPSTREAM" = "yes" ]; then
 		mptcpize enable v2ray
 	fi
