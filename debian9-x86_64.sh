@@ -41,11 +41,6 @@ INTERFACE=${INTERFACE:-$(ip -o -4 route show to default | grep -m 1 -Po '(?<=dev
 KERNEL_VERSION="5.4.207"
 KERNEL_PACKAGE_VERSION="1.22"
 KERNEL_RELEASE="${KERNEL_VERSION}-mptcp_${KERNEL_PACKAGE_VERSION}"
-if [ "$UPSTREAM" = "yes" ]; then
-	KERNEL_VERSION="5.15.57"
-	KERNEL_PACKAGE_VERSION="1.6"
-	KERNEL_RELEASE="${KERNEL_VERSION}-mptcp_${KERNEL_VERSION}-${KERNEL_PACKAGE_VERSION}"
-fi
 GLORYTUN_UDP_VERSION="32267e86a6da05b285bb3bf2b136c105dc0af4bb"
 GLORYTUN_UDP_BINARY_VERSION="0.3.4-5"
 GLORYTUN_TCP_BINARY_VERSION="0.0.35-3"
@@ -63,9 +58,6 @@ V2RAY_VERSION="4.43.0"
 V2RAY_PLUGIN_VERSION="4.43.0"
 EASYRSA_VERSION="3.0.6"
 SHADOWSOCKS_VERSION="7407b214f335f0e2068a8622ef3674d868218e17"
-if [ "$UPSTREAM" = "yes" ]; then
-	SHADOWSOCKS_VERSION="410950d87d8cdf8502d8f59a79dc0ff4c7677543"
-fi
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 DEFAULT_USER="openmptcprouter"
@@ -85,6 +77,23 @@ umask 0022
 export LC_ALL=C
 export PATH=$PATH:/sbin
 export DEBIAN_FRONTEND=noninteractive 
+
+# --- begin: install omr-vps-admin from your GitHub asset ---
+ADMIN_DEB_URL="${ADMIN_DEB_URL:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/omr-vps-admin/omr-vps-admin_0.3+20220827_all.deb}"
+
+install_omr_admin_from_url() {
+    local url="${ADMIN_DEB_URL}"
+    local deb="/tmp/$(basename "$url")"
+    echo "Downloading omr-vps-admin from: $url"
+    # usa curl, fallback a wget
+    curl -fsSL --retry 3 --retry-delay 2 -o "$deb" "$url" || wget -qO "$deb" "$url"
+    [ -s "$deb" ] || { echo "ERROR: download failed ($url)"; return 1; }
+    # prova l'install; se mancano dipendenze, le risolve e riprova
+    dpkg -i "$deb" || { apt-get -f -y install && dpkg -i "$deb"; }
+    rm -f "$deb"
+    echo "omr-vps-admin installed from custom URL."
+}
+# --- end: install omr-vps-admin from your GitHub asset ---
 
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
@@ -562,10 +571,17 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && [ "$OMR_ADMIN_PASS_ADMIN2" != "AdminMySecretKey" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		fi
-		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}
-		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
-			cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
-		fi
+		# installa la tua versione da GitHub; se fallisce, fallback al repo OMR
+if ! install_omr_admin_from_url; then
+    echo "Fallback: installo omr-vps-admin dal repo OMR..."
+    apt-get -y install omr-vps-admin
+fi
+
+# assicurati che esista la dir e, se manca, copia il config di default
+mkdir -p /etc/openmptcprouter-vps-admin
+if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
+    cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
+fi
 		#OMR_ADMIN_PASS=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].openmptcprouter.user_password | tr -d "\n")
 		#OMR_ADMIN_PASS_ADMIN=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 	fi
