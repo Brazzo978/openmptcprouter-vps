@@ -379,10 +379,15 @@ fi
 #	exit 1
 #fi
 echo "Check about broken packages..."
-apt-get check >/dev/null 2>&1
-if [ "$?" -ne 0 ]; then
-	echo "E: \`apt-get check\` failed, you may have broken packages. Aborting..."
-	exit 1
+set +e
+apt_get_check_status=0
+if ! apt-get check >/dev/null 2>&1; then
+        apt_get_check_status=$?
+fi
+set -e
+if [ "$apt_get_check_status" -ne 0 ]; then
+        echo "E: \`apt-get check\` failed, you may have broken packages. Aborting..."
+        exit 1
 fi
 
 # Fix old string...
