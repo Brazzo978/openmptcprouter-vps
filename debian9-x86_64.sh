@@ -173,8 +173,28 @@ install_omr_package() {
         wget -O "$dest" "$url"
     fi
     if [ -n "$dest" ]; then
-        apt-get -y "$@" install "$dest"
-        rc=$?
+        if ! apt-get -y "$@" install "$dest"; then
+            # Try to resolve missing dependencies explicitly when the direct
+            # installation of the .deb fails (for example when installing
+            # packages downloaded from GitHub that are not part of any APT
+            # repository).
+            if dpkg -i "$dest"; then
+                rc=0
+            else
+                rc=$?
+                if apt-get -y "$@" -f install; then
+                    if dpkg -i "$dest"; then
+                        rc=0
+                    else
+                        rc=$?
+                    fi
+                else
+                    rc=$?
+                fi
+            fi
+        else
+            rc=0
+        fi
         rm -f "$dest"
         return $rc
     fi
