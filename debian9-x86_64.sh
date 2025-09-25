@@ -41,6 +41,11 @@ INTERFACE=${INTERFACE:-$(ip -o -4 route show to default | grep -m 1 -Po '(?<=dev
 KERNEL_VERSION="5.4.207"
 KERNEL_PACKAGE_VERSION="1.22"
 KERNEL_RELEASE="${KERNEL_VERSION}-mptcp_${KERNEL_PACKAGE_VERSION}"
+if [ "$UPSTREAM" = "yes" ]; then
+	KERNEL_VERSION="5.15.57"
+	KERNEL_PACKAGE_VERSION="1.6"
+	KERNEL_RELEASE="${KERNEL_VERSION}-mptcp_${KERNEL_VERSION}-${KERNEL_PACKAGE_VERSION}"
+fi
 GLORYTUN_UDP_VERSION="32267e86a6da05b285bb3bf2b136c105dc0af4bb"
 GLORYTUN_UDP_BINARY_VERSION="0.3.4-5"
 GLORYTUN_TCP_BINARY_VERSION="0.0.35-3"
@@ -58,6 +63,9 @@ V2RAY_VERSION="4.43.0"
 V2RAY_PLUGIN_VERSION="4.43.0"
 EASYRSA_VERSION="3.0.6"
 SHADOWSOCKS_VERSION="7407b214f335f0e2068a8622ef3674d868218e17"
+if [ "$UPSTREAM" = "yes" ]; then
+	SHADOWSOCKS_VERSION="410950d87d8cdf8502d8f59a79dc0ff4c7677543"
+fi
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 DEFAULT_USER="openmptcprouter"
@@ -67,10 +75,8 @@ VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com
 VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
-USE_OMR_REPO="no"
-FORCE_REINSTALL="${FORCE_REINSTALL:-no}"
 
-OMR_VERSION="0.1028-3Ktest"
+OMR_VERSION="0.1028"
 
 DIR=$( pwd )
 #"
@@ -79,54 +85,6 @@ umask 0022
 export LC_ALL=C
 export PATH=$PATH:/sbin
 export DEBIAN_FRONTEND=noninteractive 
-
-# --- begin: install omr-vps-admin from your GitHub asset ---
-ADMIN_DEB_URL="${ADMIN_DEB_URL:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/omr-vps-admin/omr-vps-admin_0.3+20220827_all.deb}"
-V2RAY_DEB_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/v2ray-4.43.0-amd64.deb"
-GLORYTUN_UDP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun_0.3.4-5_amd64.deb"
-GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
-DSVPN_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-dsvpn_0.1.4-2_amd64.deb"
-
-install_v2ray_from_url() {
-    local url="${V2RAY_DEB_URL}"
-    local deb="/tmp/$(basename \"$url\")"
-    echo "Downloading v2ray from: $url"
-    curl -fsSL --retry 3 --retry-delay 2 -o "$deb" "$url" || wget -qO "$deb" "$url"
-    [ -s "$deb" ] || { echo "ERROR: download failed ($url)"; return 1; }
-    dpkg -i "$deb" || { apt-get -f -y install && dpkg -i "$deb"; }
-    rm -f "$deb"
-    echo "v2ray 4.43.0 installed from custom URL."
-}
-
-install_omr_admin_from_url() {
-    local url="${ADMIN_DEB_URL}"
-    local deb="/tmp/$(basename "$url")"
-    echo "Downloading omr-vps-admin from: $url"
-    # usa curl, fallback a wget
-    curl -fsSL --retry 3 --retry-delay 2 -o "$deb" "$url" || wget -qO "$deb" "$url"
-    [ -s "$deb" ] || { echo "ERROR: download failed ($url)"; return 1; }
-    # prova l'install; se mancano dipendenze, le risolve e riprova
-    dpkg -i "$deb" || { apt-get -f -y install && dpkg -i "$deb"; }
-    rm -f "$deb"
-    echo "omr-vps-admin installed from custom URL."
-}
-
-# Impedisci ai postinst di avviare servizi durante l’install
-install_block_service_starts() {
-  mkdir -p /usr/sbin
-  cat >/usr/sbin/policy-rc.d <<'EOF'
-#!/bin/sh
-# 101 = action not allowed (usato da invoke-rc.d/deb-systemd-invoke)
-exit 101
-EOF
-  chmod +x /usr/sbin/policy-rc.d
-}
-
-# Riabilita l’avvio servizi
-install_unblock_service_starts() {
-  rm -f /usr/sbin/policy-rc.d
-}
-
 
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
@@ -138,9 +96,17 @@ if test -f /etc/os-release ; then
 else
 	. /usr/lib/os-release
 fi
-if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "11" ]; then
-    echo "This script only works with Debian Bullseye (11.x)"
-    exit 1
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" != "9" ] && [ "$VERSION_ID" != "10" ] && [ "$VERSION_ID" != "11" ]; then
+	echo "This script only work with Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
+	exit 1
+elif [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "18.04" ] && [ "$VERSION_ID" != "19.04" ] && [ "$VERSION_ID" != "20.04" ] && [ "$VERSION_ID" != "22.04" ]; then
+	echo "This script only work with Ubuntu 18.04, 19.04, 20.04 or 22.04"
+	echo "Use debian when possible"
+	exit 1
+elif [ "$ID" != "debian" ] && [ "$ID" != "ubuntu" ]; then
+	echo "This script only work with Ubuntu 18.04, Ubuntu 19.04, Ubutun 20.04, Ubuntu 22.04, Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
+	echo "Use Debian when possible"
+	exit 1
 fi
 
 echo "Check architecture..."
@@ -191,77 +157,134 @@ if [ "$UPDATE" = "yes" ]; then
 	fi
 	echo "Update mode"
 fi
+# Force update key
+[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+	echo "Update OpenMPTCProuter repo key"
+	wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
+}
 
-echo "Remove lock and update packages list..."
-rm -f /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
-
-# 🔒 Se NON usiamo la repo OMR, rimuovi eventuali tracce/pin pre-esistenti
-if [ "$USE_OMR_REPO" = "no" ]; then
-    rm -f /etc/apt/sources.list.d/openmptcprouter.list \
-          /etc/apt/sources.list.d/openmptcprouter-test.list \
-          /etc/apt/preferences.d/openmptcprouter.pref
+CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}')"
+if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
+	exit 1
 fi
 
-# Debian 11: update pacchetti
-apt-get update --allow-releaseinfo-change
+[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+	echo "Update ${REPO} key"
+	if [ "$CHINA" = "yes" ]; then
+		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+		wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+	else
+		wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+	fi
+}
 
-rm -f /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
-
+echo "Remove lock and update packages list..."
+rm -f /var/lib/dpkg/lock
+rm -f /var/lib/dpkg/lock-frontend
+rm -f /var/cache/apt/archives/lock
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
+	apt-get update
+else
+	apt-get update --allow-releaseinfo-change
+fi
+rm -f /var/lib/dpkg/lock
+rm -f /var/lib/dpkg/lock-frontend
+rm -f /var/cache/apt/archives/lock
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server
 
-# Add OpenMPTCProuter repo (disabilitato di default)
-if [ "$USE_OMR_REPO" = "yes" ]; then
-    echo "Add OpenMPTCProuter repo..."
-    if [ "$CHINA" = "yes" ]; then
-        echo "Install git..."
-        apt-get -y install git
-        if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
-            git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
-        fi
-        cd /var/lib/openmptcprouter-vps-debian
-        git pull
-        echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
-        cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
-        if [ ! -d /usr/share/omr-server-git ]; then
-            git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
-        fi
-        cd /usr/share/omr-server-git
-        git pull
-        if [ "$VPSPATH" = "server-test" ]; then
-            git checkout develop
-        else
-            git checkout master
-        fi
-        LOCALFILES="yes"
-        TLS="no"
-        DIR="/usr/share/omr-server-git"
-    else
-        echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
-        cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-            Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
-            Package: *
-            Pin: origin ${REPO}
-            Pin-Priority: 1001
-        EOF
-        if [ -n "$(echo $OMR_VERSION | grep test)" ]; then
-            echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
-            cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-                Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
-                Package: *
-                Pin: origin ${REPO}
-                Pin-Priority: 1002
-            EOF
-        else
-            rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
-        fi
-        wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-    fi
+#if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_DEBIAN" = "yes" ] && [ "$update" = "0" ]; then
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_OS" = "yes" ]; then
+	echo "Update Debian 9 Stretch to Debian 10 Buster"
+	apt-get -y -f --force-yes upgrade
+	apt-get -y -f --force-yes dist-upgrade
+	sed -i 's:stretch:buster:g' /etc/apt/sources.list
+	apt-get update --allow-releaseinfo-change
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
+	VERSION_ID="10"
+fi
+if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
+	echo "Update Ubuntu 18.04 to Ubuntu 20.04"
+	apt-get -y -f --force-yes upgrade
+	apt-get -y -f --force-yes dist-upgrade
+	sed -i 's:bionic:focal:g' /etc/apt/sources.list
+	apt-get update --allow-releaseinfo-change
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
+	VERSION_ID="20.04"
 fi
 
-[ "$USE_OMR_REPO" = "yes" ] && apt-get update
+# Add OpenMPTCProuter repo
+echo "Add OpenMPTCProuter repo..."
+if [ "$CHINA" = "yes" ]; then
+	echo "Install git..."
+	apt-get -y install git
+	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
+		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
+		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
+	fi
+	cd /var/lib/openmptcprouter-vps-debian
+	git pull
+#	if [ "$VPSPATH" = "server-test" ]; then
+#		git checkout develop
+#	else
+#		git checkout main
+#	fi
+	echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
+	cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
+	if [ ! -d /usr/share/omr-server-git ]; then
+		#git clone https://gitee.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
+		git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
+	fi
+	cd /usr/share/omr-server-git
+	git pull
+	if [ "$VPSPATH" = "server-test" ]; then
+		git checkout develop
+	else
+		git checkout master
+	fi
+	LOCALFILES="yes"
+	TLS="no"
+	DIR="/usr/share/omr-server-git"
+else
+	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+		Package: *
+		Pin: origin ${REPO}
+		Pin-Priority: 1001
+	EOF
+	if [ -n "$(echo $OMR_VERSION | grep test)" ]; then
+		echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
+		cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+			Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+			Package: *
+			Pin: origin ${REPO}
+			Pin-Priority: 1002
+		EOF
+	else
+		rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
+	fi
+	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+fi
 
-
+#apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
+if [ "$ID" = "debian" ]; then
+	if [ "$VERSION_ID" = "9" ]; then
+		#echo 'deb http://dl.bintray.com/cpaasch/deb jessie main' >> /etc/apt/sources.list
+		echo 'deb http://deb.debian.org/debian stretch-backports main' > /etc/apt/sources.list.d/stretch-backports.list
+	fi
+	# Add buster-backports repo
+	echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/buster-backports.list
+elif [ "$ID" = "ubuntu" ]; then
+	echo 'deb http://archive.ubuntu.com/ubuntu bionic-backports main' > /etc/apt/sources.list.d/bionic-backports.list
+	echo 'deb http://archive.ubuntu.com/ubuntu bionic universe' > /etc/apt/sources.list.d/bionic-universe.list
+	[ "$VERSION_ID" = "22.04" ] && {
+		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32
+		echo 'deb http://old-releases.ubuntu.com/ubuntu impish main universe' > /etc/apt/sources.list.d/impish-universe.list
+	}
+fi
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
@@ -585,17 +608,10 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && [ "$OMR_ADMIN_PASS_ADMIN2" != "AdminMySecretKey" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		fi
-		# installa la tua versione da GitHub; se fallisce, fallback al repo OMR
-if ! install_omr_admin_from_url; then
-    echo "Fallback: installo omr-vps-admin dal repo OMR..."
-    apt-get -y install omr-vps-admin
-fi
-
-# assicurati che esista la dir e, se manca, copia il config di default
-mkdir -p /etc/openmptcprouter-vps-admin
-if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
-    cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
-fi
+		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}
+		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
+			cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
+		fi
 		#OMR_ADMIN_PASS=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].openmptcprouter.user_password | tr -d "\n")
 		#OMR_ADMIN_PASS_ADMIN=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 	fi
@@ -768,27 +784,25 @@ if systemctl -q is-active v2ray.service; then
 fi
 
 if [ "$V2RAY" = "yes" ]; then
-	# Installa la tua 4.43.0 dal tuo GitHub; se fallisce, prova la candidate dal repo OMR
-	if ! install_v2ray_from_url; then
-		echo "Fallback: installo v2ray dal repo (candidate)"
-		apt-get -y install v2ray
+	#apt-get -y -o Dpkg::Options::="--force-overwrite" install v2ray
+	if [ "$SOURCES" = "yes" ]; then
+		wget -O /tmp/v2ray-${V2RAY_VERSION}-amd64.deb ${VPSURL}/debian/v2ray-${V2RAY_VERSION}-amd64.deb
+		dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
+		rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
+	else
+		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
 	fi
-
 	if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
 		sed -i "s:V2RAY_UUID:$V2RAY_UUID:g" /etc/v2ray/v2ray-server.json
 	fi
-
 	rm -f /etc/v2ray/config.json
 	ln -s /etc/v2ray/v2ray-server.json /etc/v2ray/config.json
-
 	if [ -f /etc/systemd/system/v2ray.service.dpkg-dist ]; then
 		mv -f /etc/systemd/system/v2ray.service.dpkg-dist /etc/systemd/system/v2ray.service
 	fi
-
 	systemctl daemon-reload
 	systemctl enable v2ray.service
-
 	if [ "$UPSTREAM" = "yes" ]; then
 		mptcpize enable v2ray
 	fi
@@ -1076,81 +1090,62 @@ if [ "$OPENVPN" = "yes" ]; then
 fi
 
 echo 'Glorytun UDP'
-
-# stop eventuali istanze
+# Install Glorytun UDP
 if systemctl -q is-active glorytun-udp@tun0.service; then
-  systemctl -q stop 'glorytun-udp@*' >/dev/null 2>&1
+	systemctl -q stop 'glorytun-udp@*' > /dev/null 2>&1
 fi
-
-rm -f /usr/local/bin/glorytun
-
-# 1) NON far partire servizi durante l’install
-install_block_service_starts
-
-# 2) Prepara directory + chiave PRIMA (il postinst le può volere)
-mkdir -p /etc/glorytun-udp
-if [ -f /etc/glorytun-udp/tun0.key ]; then
-  GLORYTUN_PASS="$(tr -d '\n' </etc/glorytun-udp/tun0.key)"
+if [ "$SOURCES" = "yes" ]; then
+	rm -f /var/lib/dpkg/lock
+	rm -f /var/lib/dpkg/lock-frontend
+	rm -f /usr/bin/glorytun
+	apt-get install -y --no-install-recommends build-essential git ca-certificates meson pkg-config
+	rm -rf /tmp/glorytun-udp
+	cd /tmp
+	git clone https://github.com/angt/glorytun.git /tmp/glorytun-udp
+	cd /tmp/glorytun-udp
+	git checkout ${GLORYTUN_UDP_VERSION}
+	git submodule update --init --recursive
+	meson build
+	ninja -C build install
+	sed -i 's:EmitDNS=yes:EmitDNS=no:g' /lib/systemd/network/glorytun.network
+	rm /lib/systemd/system/glorytun*
+	rm /lib/systemd/network/glorytun*
+	if [ "$LOCALFILES" = "no" ]; then
+		wget -O /usr/local/bin/glorytun-udp-run ${VPSURL}${VPSPATH}/glorytun-udp-run
+	else
+		cp ${DIR}/glorytun-udp-run /usr/local/bin/glorytun-udp-run
+	fi
+	chmod 755 /usr/local/bin/glorytun-udp-run
+	if [ "$LOCALFILES" = "no" ]; then
+		wget -O /lib/systemd/system/glorytun-udp@.service ${VPSURL}${VPSPATH}/glorytun-udp%40.service.in
+	else
+		cp ${DIR}/glorytun-udp@.service.in /lib/systemd/system/glorytun-udp@.service
+	fi
+	#wget -O /lib/systemd/network/glorytun-udp.network ${VPSURL}${VPSPATH}/glorytun-udp.network
+	rm -f /lib/systemd/network/glorytun-udp.network
+	mkdir -p /etc/glorytun-udp
+	if [ "$LOCALFILES" = "no" ]; then
+		wget -O /etc/glorytun-udp/post.sh ${VPSURL}${VPSPATH}/glorytun-udp-post.sh
+		wget -O /etc/glorytun-udp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun-udp
+	else
+		cp ${DIR}/glorytun-udp-post.sh /etc/glorytun-udp/post.sh
+		cp ${DIR}/tun0.glorytun-udp /etc/glorytun-udp/tun0
+	fi
+	chmod 755 /etc/glorytun-udp/post.sh
+	if [ "$update" = "0" ] || [ ! -f /etc/glorytun-udp/tun0.key ]; then
+		echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
+	elif [ ! -f /etc/glorytun-udp/tun0.key ] && [ -f /etc/glorytun-tcp/tun0.key ]; then
+		cp /etc/glorytun-tcp/tun0.key /etc/glorytun-udp/tun0.key
+	fi
+	systemctl enable glorytun-udp@tun0.service
+	systemctl enable systemd-networkd.service
+	cd /tmp
+	rm -rf /tmp/glorytun-udp
 else
-  echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
+	rm -f /usr/local/bin/glorytun
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun=${GLORYTUN_UDP_BINARY_VERSION}
+	GLORYTUN_PASS="$(cat /etc/glorytun-udp/tun0.key | tr -d '\n')"
 fi
-# placeholder di config per non far fallire il postinst se controlla il file
-if [ ! -f /etc/glorytun-udp/tun0 ]; then
-  cat <<'EOF' >/etc/glorytun-udp/tun0
-# Config temporanea generata dallo script di installazione.
-# Verrà sostituita da quella reale a setup completato.
-BIND=0.0.0.0
-BIND_PORT=65001
-HOST=0.0.0.0
-PORT=5000
-DEV=tun0
-OPTIONS="chacha persist"
-EOF
-fi
-
-# 3) Installa il .deb vendorizzato (risolve dipendenze da solo)
-GLORYTUN_UDP_DEB="/tmp/$(basename "$GLORYTUN_UDP_URL")"
-GLORYTUN_UDP_SKIP="no"
-if [ "$FORCE_REINSTALL" != "yes" ]; then
-  CUR_GLORYTUN_UDP="$(dpkg-query -W -f='${Version}' omr-glorytun 2>/dev/null || true)"
-  if [ -n "$CUR_GLORYTUN_UDP" ] && dpkg --compare-versions "$CUR_GLORYTUN_UDP" ge "$GLORYTUN_UDP_BINARY_VERSION"; then
-    echo "[INFO] omr-glorytun già installato (versione $CUR_GLORYTUN_UDP >= $GLORYTUN_UDP_BINARY_VERSION). Skip."
-    GLORYTUN_UDP_SKIP="yes"
-  fi
-fi
-if [ "$GLORYTUN_UDP_SKIP" != "yes" ]; then
-  echo "[INFO] Scarico omr-glorytun da: $GLORYTUN_UDP_URL"
-  if ! curl -fsSL --retry 3 --retry-delay 2 -o "$GLORYTUN_UDP_DEB" "$GLORYTUN_UDP_URL"; then
-    wget -qO "$GLORYTUN_UDP_DEB" "$GLORYTUN_UDP_URL"
-  fi
-  if [ ! -s "$GLORYTUN_UDP_DEB" ]; then
-    echo "[ERR] download di omr-glorytun fallito ($GLORYTUN_UDP_URL)" >&2
-    exit 1
-  fi
-  if ! dpkg -i "$GLORYTUN_UDP_DEB"; then
-    apt-get -f -y install
-    dpkg -i "$GLORYTUN_UDP_DEB"
-  fi
-fi
-rm -f "$GLORYTUN_UDP_DEB"
-
-# 4) Riabilita avvio servizi
-install_unblock_service_starts
-
-# 5) (opzionale) Sovrascrivi con la tua config reale se la hai in repo/dir
-if [ "$LOCALFILES" = "no" ]; then
-  # adatta se il path è diverso nella tua fork
-  wget -q -O /etc/glorytun-udp/tun0 "${VPSURL}${VPSPATH}/tun0.glorytun-udp" || true
-else
-  [ -f "${DIR}/tun0.glorytun-udp" ] && cp "${DIR}/tun0.glorytun-udp" /etc/glorytun-udp/tun0
-fi
-chmod 600 /etc/glorytun-udp/tun0.key
-
-# 6) Abilita (avviare SOLO quando la config è ok)
-systemctl enable glorytun-udp@tun0.service
-# systemctl start glorytun-udp@tun0.service || echo "[WARN] Non avviato: verifica /etc/glorytun-udp/tun0"
-
-# IPv6: se presente, sostituisci 0.0.0.0 con ::
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
 
 
@@ -1159,113 +1154,104 @@ apt-get install -y chrony
 systemctl enable chrony
 
 if [ "$DSVPN" = "yes" ]; then
-  echo 'A Dead Simple VPN'
-
-  if systemctl -q is-active dsvpn-server.service; then
-    systemctl -q disable dsvpn-server >/dev/null 2>&1
-    systemctl -q stop dsvpn-server >/dev/null 2>&1
-  fi
-
-  install_block_service_starts
-
-  mkdir -p /etc/dsvpn
-  [ -f /etc/dsvpn/dsvpn0.key ] || echo "$DSVPN_PASS" >/etc/dsvpn/dsvpn0.key
-  [ -f /etc/dsvpn/dsvpn0 ] || echo "keyfile=/etc/dsvpn/dsvpn0.key" >/etc/dsvpn/dsvpn0
-
-  DSVPN_DEB="/tmp/$(basename "$DSVPN_URL")"
-  DSVPN_SKIP="no"
-  if [ "$FORCE_REINSTALL" != "yes" ]; then
-    CUR_DSVPN="$(dpkg-query -W -f='${Version}' omr-dsvpn 2>/dev/null || true)"
-    if [ -n "$CUR_DSVPN" ] && dpkg --compare-versions "$CUR_DSVPN" ge "$DSVPN_BINARY_VERSION"; then
-      echo "[INFO] omr-dsvpn già installato (versione $CUR_DSVPN >= $DSVPN_BINARY_VERSION). Skip."
-      DSVPN_SKIP="yes"
-    fi
-  fi
-  if [ "$DSVPN_SKIP" != "yes" ]; then
-    echo "[INFO] Scarico omr-dsvpn da: $DSVPN_URL"
-    if ! curl -fsSL --retry 3 --retry-delay 2 -o "$DSVPN_DEB" "$DSVPN_URL"; then
-      wget -qO "$DSVPN_DEB" "$DSVPN_URL"
-    fi
-    if [ ! -s "$DSVPN_DEB" ]; then
-      echo "[ERR] download di omr-dsvpn fallito ($DSVPN_URL)" >&2
-      exit 1
-    fi
-    if ! dpkg -i "$DSVPN_DEB"; then
-      apt-get -f -y install
-      dpkg -i "$DSVPN_DEB"
-    fi
-  fi
-  rm -f "$DSVPN_DEB"
-
-  install_unblock_service_starts
-
-  systemctl enable dsvpn-server@dsvpn0.service
-  # systemctl start dsvpn-server@dsvpn0.service || echo "[WARN] Non avviato: verifica /etc/dsvpn/dsvpn0"
-
-  [ "$UPSTREAM" = "yes" ] && mptcpize enable dsvpn-server@dsvpn0
+	echo 'A Dead Simple VPN'
+	# Install A Dead Simple VPN
+	if systemctl -q is-active dsvpn-server.service; then
+		systemctl -q disable dsvpn-server > /dev/null 2>&1
+		systemctl -q stop dsvpn-server > /dev/null 2>&1
+	fi
+	if [ "$SOURCES" = "yes" ]; then
+		rm -f /var/lib/dpkg/lock
+		rm -f /var/lib/dpkg/lock-frontend
+		apt-get install -y --no-install-recommends build-essential git ca-certificates
+		rm -rf /tmp/dsvpn
+		cd /tmp
+		git clone https://github.com/jedisct1/dsvpn.git /tmp/dsvpn
+		cd /tmp/dsvpn
+		git checkout ${DSVPN_VERSION}
+		wget https://github.com/Ysurac/openmptcprouter-feeds/raw/develop/dsvpn/patches/nofirewall.patch
+		patch -p1 < nofirewall.patch
+		make CFLAGS='-DNO_DEFAULT_ROUTES -DNO_DEFAULT_FIREWALL'
+		make install
+		rm -f /lib/systemd/system/dsvpn/*
+		wget -O /usr/local/bin/dsvpn-run ${VPSURL}${VPSPATH}/dsvpn-run
+		chmod 755 /usr/local/bin/dsvpn-run
+		wget -O /lib/systemd/system/dsvpn-server@.service ${VPSURL}${VPSPATH}/dsvpn-server%40.service.in
+		mkdir -p /etc/dsvpn
+		wget -O /etc/dsvpn/dsvpn0 ${VPSURL}${VPSPATH}/dsvpn0-config
+		if [ -f /etc/dsvpn/dsvpn.key ]; then
+			mv /etc/dsvpn/dsvpn.key /etc/dsvpn/dsvpn0.key
+		fi
+		if [ "$update" = "0" ] || [ ! -f /etc/dsvpn/dsvpn0.key ]; then
+			echo "$DSVPN_PASS" > /etc/dsvpn/dsvpn0.key
+		fi
+		systemctl enable dsvpn-server@dsvpn0.service
+		cd /tmp
+		rm -rf /tmp/dsvpn
+	else
+		apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install omr-dsvpn=${DSVPN_BINARY_VERSION}
+		DSVPN_PASS=$(cat /etc/dsvpn/dsvpn0.key | tr -d "\n")
+	fi
+	if [ "$UPSTREAM" = "yes" ]; then
+		mptcpize enable dsvpn-server@dsvpn0
+	fi
 fi
 
-
-
-echo 'Glorytun TCP'
-
+# Install Glorytun TCP
 if systemctl -q is-active glorytun-tcp@tun0.service; then
-  systemctl -q stop 'glorytun-tcp@*' >/dev/null 2>&1
+	systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
 fi
-rm -f /usr/local/bin/glorytun-tcp
-
-install_block_service_starts
-
-mkdir -p /etc/glorytun-tcp
-# riusa la chiave UDP se esiste, altrimenti crea da variabile
-if [ -f /etc/glorytun-tcp/tun0.key ]; then
-  :
-elif [ -f /etc/glorytun-udp/tun0.key ]; then
-  cp /etc/glorytun-udp/tun0.key /etc/glorytun-tcp/tun0.key
+if [ "$SOURCES" = "yes" ]; then
+	if [ "$ID" = "debian" ]; then
+		if [ "$VERSION_ID" = "9" ]; then
+			apt -t stretch-backports -y install libsodium-dev
+		else
+			apt -y install libsodium-dev
+		fi
+	elif [ "$ID" = "ubuntu" ]; then
+		apt-get -y install libsodium-dev
+	fi
+	rm -f /var/lib/dpkg/lock
+	rm -f /var/lib/dpkg/lock-frontend
+	rm -f /usr/bin/glorytun-tcp
+	apt-get -y install build-essential pkg-config autoconf automake
+	rm -rf /tmp/glorytun-0.0.35
+	cd /tmp
+	if [ "$UPSTREAM" = "yes" ]; then
+		wget -O /tmp/glorytun-0.0.35.tar.gz https://github.com/Ysurac/glorytun/archive/refs/heads/tcp.tar.gz
+	else
+		wget -O /tmp/glorytun-0.0.35.tar.gz http://github.com/angt/glorytun/releases/download/v0.0.35/glorytun-0.0.35.tar.gz
+	fi
+	tar xzf glorytun-0.0.35.tar.gz
+	if [ "$UPSTREAM" = "yes" ]; then
+		mv /tmp/glorytun-tcp /tmp/glorytun-0.0.35
+	fi
+	cd glorytun-0.0.35
+	./autogen.sh
+	./configure
+	make
+	cp glorytun /usr/local/bin/glorytun-tcp
+	wget -O /usr/local/bin/glorytun-tcp-run ${VPSURL}${VPSPATH}/glorytun-tcp-run
+	chmod 755 /usr/local/bin/glorytun-tcp-run
+	wget -O /lib/systemd/system/glorytun-tcp@.service ${VPSURL}${VPSPATH}/glorytun-tcp%40.service.in
+	#wget -O /lib/systemd/network/glorytun-tcp.network ${VPSURL}${VPSPATH}/glorytun.network
+	rm -f /lib/systemd/network/glorytun-tcp.network
+	mkdir -p /etc/glorytun-tcp
+	wget -O /etc/glorytun-tcp/post.sh ${VPSURL}${VPSPATH}/glorytun-tcp-post.sh
+	chmod 755 /etc/glorytun-tcp/post.sh
+	wget -O /etc/glorytun-tcp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun
+	if [ "$update" = "0" ]; then
+		echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
+	fi
+	systemctl enable glorytun-tcp@tun0.service
+	#systemctl enable systemd-networkd.service
+	cd /tmp
+	rm -rf /tmp/glorytun-0.0.35
 else
-  echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
+	rm -f /usr/local/bin/glorytun-tcp
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun-tcp=${GLORYTUN_TCP_BINARY_VERSION}
 fi
-[ -f /etc/glorytun-tcp/tun0 ] || echo "keyfile=/etc/glorytun-tcp/tun0.key" >/etc/glorytun-tcp/tun0
-
-GLORYTUN_TCP_DEB="/tmp/$(basename "$GLORYTUN_TCP_URL")"
-GLORYTUN_TCP_SKIP="no"
-if [ "$FORCE_REINSTALL" != "yes" ]; then
-  CUR_GLORYTUN_TCP="$(dpkg-query -W -f='${Version}' omr-glorytun-tcp 2>/dev/null || true)"
-  if [ -n "$CUR_GLORYTUN_TCP" ] && dpkg --compare-versions "$CUR_GLORYTUN_TCP" ge "$GLORYTUN_TCP_BINARY_VERSION"; then
-    echo "[INFO] omr-glorytun-tcp già installato (versione $CUR_GLORYTUN_TCP >= $GLORYTUN_TCP_BINARY_VERSION). Skip."
-    GLORYTUN_TCP_SKIP="yes"
-  fi
-fi
-if [ "$GLORYTUN_TCP_SKIP" != "yes" ]; then
-  echo "[INFO] Scarico omr-glorytun-tcp da: $GLORYTUN_TCP_URL"
-  if ! curl -fsSL --retry 3 --retry-delay 2 -o "$GLORYTUN_TCP_DEB" "$GLORYTUN_TCP_URL"; then
-    wget -qO "$GLORYTUN_TCP_DEB" "$GLORYTUN_TCP_URL"
-  fi
-  if [ ! -s "$GLORYTUN_TCP_DEB" ]; then
-    echo "[ERR] download di omr-glorytun-tcp fallito ($GLORYTUN_TCP_URL)" >&2
-    exit 1
-  fi
-  if ! dpkg -i "$GLORYTUN_TCP_DEB"; then
-    apt-get -f -y install
-    dpkg -i "$GLORYTUN_TCP_DEB"
-  fi
-fi
-rm -f "$GLORYTUN_TCP_DEB"
-
-install_unblock_service_starts
-
-if [ "$LOCALFILES" = "no" ]; then
-  wget -q -O /etc/glorytun-tcp/tun0 "${VPSURL}${VPSPATH}/tun0.glorytun" || true
-else
-  [ -f "${DIR}/tun0.glorytun" ] && cp "${DIR}/tun0.glorytun" /etc/glorytun-tcp/tun0
-fi
-chmod 600 /etc/glorytun-tcp/tun0.key
-
-systemctl enable glorytun-tcp@tun0.service
-# systemctl start glorytun-tcp@tun0.service || echo "[WARN] Non avviato: verifica /etc/glorytun-tcp/tun0"
-
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
-
 
 
 # Load tun module at boot time
