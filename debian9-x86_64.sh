@@ -37,6 +37,15 @@ NOINTERNET=${NOINTERNET:-no}
 REINSTALL=${REINSTALL:-yes}
 SPEEDTEST=${SPEEDTEST:-yes}
 LOCALFILES=${LOCALFILES:-no}
+OMR_STATIC_DEB_BASE=${OMR_STATIC_DEB_BASE:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack}
+if [ -z "${USE_OMR_REPO+x}" ]; then
+        if [ -n "$OMR_STATIC_DEB_BASE" ]; then
+                USE_OMR_REPO=no
+        else
+                USE_OMR_REPO=yes
+        fi
+fi
+OMR_REQUIRE_STATIC=${OMR_REQUIRE_STATIC:-no}
 INTERFACE=${INTERFACE:-$(ip -o -4 route show to default | grep -m 1 -Po '(?<=dev )(\S+)' | tr -d "\n")}
 KERNEL_VERSION="5.4.207"
 KERNEL_PACKAGE_VERSION="1.22"
@@ -80,6 +89,78 @@ OMR_VERSION="0.1028"
 
 DIR=$( pwd )
 #"
+get_static_deb_url() {
+    base="$1"
+    file="$2"
+    if [ -n "$base" ] && [ -n "$file" ]; then
+        printf "%s/%s" "${base%/}" "$file"
+    fi
+}
+
+install_omr_package() {
+    pkg="$1"
+    version="$2"
+    filename="$3"
+    url="$4"
+    shift 4
+    dest=""
+    if [ "$LOCALFILES" = "yes" ] && [ -n "$filename" ] && [ -f "${DIR}/Pack/${filename}" ]; then
+        dest="/tmp/${filename}"
+        cp "${DIR}/Pack/${filename}" "$dest"
+    elif [ -n "$url" ]; then
+        if [ -n "$filename" ]; then
+            dest="/tmp/${filename}"
+        else
+            dest="/tmp/$(basename "$url")"
+        fi
+        wget -O "$dest" "$url"
+    fi
+    if [ -n "$dest" ]; then
+        apt-get -y "$@" install "$dest"
+        rc=$?
+        rm -f "$dest"
+        return $rc
+    fi
+    if [ "$OMR_REQUIRE_STATIC" = "yes" ] && [ "$USE_OMR_REPO" != "yes" ]; then
+        echo "Static package $pkg requested but no static file or URL provided" >&2
+        return 1
+    fi
+    if [ -n "$version" ]; then
+        apt-get -y "$@" install "${pkg}=${version}"
+    else
+        apt-get -y "$@" install "${pkg}"
+    fi
+}
+
+LINUX_IMAGE_DEB_FILE=${LINUX_IMAGE_DEB_FILE:-linux-image-${KERNEL_RELEASE}_amd64.deb}
+LINUX_IMAGE_DEB_URL=${LINUX_IMAGE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_IMAGE_DEB_FILE")}
+LINUX_HEADERS_DEB_FILE=${LINUX_HEADERS_DEB_FILE:-linux-headers-${KERNEL_RELEASE}_amd64.deb}
+LINUX_HEADERS_DEB_URL=${LINUX_HEADERS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_HEADERS_DEB_FILE")}
+TRACEBOX_DEB_FILE=${TRACEBOX_DEB_FILE:-}
+TRACEBOX_DEB_URL=${TRACEBOX_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$TRACEBOX_DEB_FILE")}
+OMR_IPERF3_DEB_FILE=${OMR_IPERF3_DEB_FILE:-}
+OMR_IPERF3_DEB_URL=${OMR_IPERF3_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_IPERF3_DEB_FILE")}
+OMR_SHADOWSOCKS_DEB_FILE=${OMR_SHADOWSOCKS_DEB_FILE:-omr-shadowsocks-libev_${SHADOWSOCKS_BINARY_VERSION}_amd64.deb}
+OMR_SHADOWSOCKS_DEB_URL=${OMR_SHADOWSOCKS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SHADOWSOCKS_DEB_FILE")}
+OMR_VPS_ADMIN_DEB_FILE=${OMR_VPS_ADMIN_DEB_FILE:-omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb}
+OMR_VPS_ADMIN_DEB_URL=${OMR_VPS_ADMIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_VPS_ADMIN_DEB_FILE")}
+OMR_SIMPLE_OBFS_DEB_FILE=${OMR_SIMPLE_OBFS_DEB_FILE:-omr-simple-obfs_${OBFS_BINARY_VERSION}_amd64.deb}
+OMR_SIMPLE_OBFS_DEB_URL=${OMR_SIMPLE_OBFS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SIMPLE_OBFS_DEB_FILE")}
+OMR_MLVPN_DEB_FILE=${OMR_MLVPN_DEB_FILE:-omr-mlvpn_${MLVPN_BINARY_VERSION}_amd64.deb}
+OMR_MLVPN_DEB_URL=${OMR_MLVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_MLVPN_DEB_FILE")}
+OMR_GLORYTUN_DEB_FILE=${OMR_GLORYTUN_DEB_FILE:-omr-glorytun_${GLORYTUN_UDP_BINARY_VERSION}_amd64.deb}
+OMR_GLORYTUN_DEB_URL=${OMR_GLORYTUN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_GLORYTUN_DEB_FILE")}
+OMR_GLORYTUN_TCP_DEB_FILE=${OMR_GLORYTUN_TCP_DEB_FILE:-omr-glorytun-tcp_${GLORYTUN_TCP_BINARY_VERSION}_amd64.deb}
+OMR_GLORYTUN_TCP_DEB_URL=${OMR_GLORYTUN_TCP_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_GLORYTUN_TCP_DEB_FILE")}
+OMR_DSVPN_DEB_FILE=${OMR_DSVPN_DEB_FILE:-omr-dsvpn_${DSVPN_BINARY_VERSION}_amd64.deb}
+OMR_DSVPN_DEB_URL=${OMR_DSVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_DSVPN_DEB_FILE")}
+V2RAY_DEB_FILE=${V2RAY_DEB_FILE:-v2ray-${V2RAY_VERSION}-amd64.deb}
+V2RAY_DEB_URL=${V2RAY_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_DEB_FILE")}
+V2RAY_PLUGIN_DEB_FILE=${V2RAY_PLUGIN_DEB_FILE:-v2ray-plugin_${V2RAY_PLUGIN_VERSION}_amd64.deb}
+V2RAY_PLUGIN_DEB_URL=${V2RAY_PLUGIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_PLUGIN_DEB_FILE")}
+OMR_SERVER_DEB_FILE=${OMR_SERVER_DEB_FILE:-omr-server_${OMR_VERSION}_all.deb}
+OMR_SERVER_DEB_URL=${OMR_SERVER_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SERVER_DEB_FILE")}
+
 set -e
 umask 0022
 export LC_ALL=C
@@ -158,9 +239,9 @@ if [ "$UPDATE" = "yes" ]; then
 	echo "Update mode"
 fi
 # Force update key
-[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-	echo "Update OpenMPTCProuter repo key"
-	wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
+[ "$USE_OMR_REPO" = "yes" ] && [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+        echo "Update OpenMPTCProuter repo key"
+        wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
 }
 
 CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}')"
@@ -168,14 +249,14 @@ if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
 	exit 1
 fi
 
-[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-	echo "Update ${REPO} key"
-	if [ "$CHINA" = "yes" ]; then
-		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-		wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-	else
-		wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-	fi
+[ "$USE_OMR_REPO" = "yes" ] && [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+        echo "Update ${REPO} key"
+        if [ "$CHINA" = "yes" ]; then
+                #wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+                wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+        else
+                wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+        fi
 }
 
 echo "Remove lock and update packages list..."
@@ -217,10 +298,11 @@ fi
 
 # Add OpenMPTCProuter repo
 echo "Add OpenMPTCProuter repo..."
-if [ "$CHINA" = "yes" ]; then
-	echo "Install git..."
-	apt-get -y install git
-	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
+if [ "$USE_OMR_REPO" = "yes" ]; then
+        if [ "$CHINA" = "yes" ]; then
+        echo "Install git..."
+        apt-get -y install git
+        if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
 		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
 		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
 	fi
@@ -247,10 +329,10 @@ if [ "$CHINA" = "yes" ]; then
 	LOCALFILES="yes"
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
-else
-	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
-	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+        else
+        echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+        cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+                Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
 		Package: *
 		Pin: origin ${REPO}
 		Pin-Priority: 1001
@@ -265,8 +347,13 @@ else
 		EOF
 	else
 		rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
-	fi
-	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+        fi
+        wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+        fi
+else
+        rm -f /etc/apt/sources.list.d/openmptcprouter.list
+        rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
+        rm -f /etc/apt/preferences.d/openmptcprouter.pref
 fi
 
 #apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
@@ -332,11 +419,12 @@ if [ "$SOURCES" = "yes" ]; then
 else
 	cd /boot
 	rename 's/^bzImage/vmlinuz/s' * >/dev/null 2>&1
-	if [ "$(dpkg -l | grep linux-image-${KERNEL_VERSION} | grep ${KERNEL_PACKAGE_VERSION})" = "" ]; then
-		echo "Install kernel linux-image-${KERNEL_RELEASE}"
-		echo "\033[1m !!! if kernel install fail run: dpkg --remove --force-remove-reinstreq linux-image-${KERNEL_VERSION}-mptcp !!! \033[0m"
-		apt-get -y install linux-image-${KERNEL_VERSION}-mptcp=${KERNEL_PACKAGE_VERSION} linux-headers-${KERNEL_VERSION}-mptcp=${KERNEL_PACKAGE_VERSION}
-	fi
+        if [ "$(dpkg -l | grep linux-image-${KERNEL_VERSION} | grep ${KERNEL_PACKAGE_VERSION})" = "" ]; then
+                echo "Install kernel linux-image-${KERNEL_RELEASE}"
+                echo "\033[1m !!! if kernel install fail run: dpkg --remove --force-remove-reinstreq linux-image-${KERNEL_VERSION}-mptcp !!! \033[0m"
+                install_omr_package "linux-image-${KERNEL_VERSION}-mptcp" "${KERNEL_PACKAGE_VERSION}" "$LINUX_IMAGE_DEB_FILE" "$LINUX_IMAGE_DEB_URL"
+                install_omr_package "linux-headers-${KERNEL_VERSION}-mptcp" "${KERNEL_PACKAGE_VERSION}" "$LINUX_HEADERS_DEB_FILE" "$LINUX_HEADERS_DEB_URL"
+        fi
 fi
 
 # Check if mptcp kernel is grub default kernel
@@ -354,9 +442,9 @@ bash update-grub.sh ${KERNEL_RELEASE}
 [ -f /boot/grub/grub.cfg ] && sed -i 's/default="1>0"/default="0"/' /boot/grub/grub.cfg 2>&1 >/dev/null
 
 echo "Install tracebox OpenMPTCProuter edition"
-apt-get -y -o Dpkg::Options::="--force-overwrite" install tracebox
+install_omr_package "tracebox" "" "$TRACEBOX_DEB_FILE" "$TRACEBOX_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 echo "Install iperf3 OpenMPTCProuter edition"
-apt-get -y -o Dpkg::Options::="--force-overwrite" install omr-iperf3
+install_omr_package "omr-iperf3" "" "$OMR_IPERF3_DEB_FILE" "$OMR_IPERF3_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 
 if [ "$UPSTREAM" = "yes" ]; then
 	echo "Compile and install mptcpize..."
@@ -467,7 +555,7 @@ if [ "$SOURCES" = "yes" ]; then
 	#rm -rf /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	rm -rf /tmp/shadowsocks-libev
 else
-	apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" install omr-shadowsocks-libev=${SHADOWSOCKS_BINARY_VERSION}
+        install_omr_package "omr-shadowsocks-libev" "${SHADOWSOCKS_BINARY_VERSION}" "$OMR_SHADOWSOCKS_DEB_FILE" "$OMR_SHADOWSOCKS_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
 fi
 
 # Load OLIA Congestion module at boot time
@@ -608,7 +696,7 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && [ "$OMR_ADMIN_PASS_ADMIN2" != "AdminMySecretKey" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		fi
-		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}
+            install_omr_package "omr-vps-admin" "${OMR_ADMIN_BINARY_VERSION}" "$OMR_VPS_ADMIN_DEB_FILE" "$OMR_VPS_ADMIN_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
 		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
 			cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
 		fi
@@ -735,7 +823,7 @@ if [ "$OBFS" = "yes" ]; then
 	else
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
-		apt-get -y -o Dpkg::Options::="--force-overwrite" install omr-simple-obfs=${OBFS_BINARY_VERSION}
+            install_omr_package "omr-simple-obfs" "${OBFS_BINARY_VERSION}" "$OMR_SIMPLE_OBFS_DEB_FILE" "$OMR_SIMPLE_OBFS_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 	fi
 	#sed -i 's%"mptcp": true%"mptcp": true,\n"plugin": "/usr/local/bin/obfs-server",\n"plugin_opts": "obfs=http;mptcp;fast-open;t=400"%' /etc/shadowsocks-libev/config.json
 fi
@@ -770,7 +858,7 @@ if [ "$V2RAY_PLUGIN" = "yes" ]; then
 	else
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
-		apt-get -y install v2ray-plugin=${V2RAY_PLUGIN_VERSION}
+                install_omr_package "v2ray-plugin" "${V2RAY_PLUGIN_VERSION}" "$V2RAY_PLUGIN_DEB_FILE" "$V2RAY_PLUGIN_DEB_URL"
 	fi
 fi
 
@@ -790,7 +878,7 @@ if [ "$V2RAY" = "yes" ]; then
 		dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
 		rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
 	else
-		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
+                install_omr_package "v2ray" "${V2RAY_VERSION}" "$V2RAY_DEB_FILE" "$V2RAY_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
 	fi
 	if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
@@ -854,7 +942,7 @@ if [ "$MLVPN" = "yes" ]; then
 			fi
 		fi
 	else
-		apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install omr-mlvpn=${MLVPN_BINARY_VERSION}
+                install_omr_package "omr-mlvpn" "${MLVPN_BINARY_VERSION}" "$OMR_MLVPN_DEB_FILE" "$OMR_MLVPN_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef"
 	fi
 	if [ "$mlvpnupdate" = "0" ]; then
 		sed -i "s:MLVPN_PASS:$MLVPN_PASS:" /etc/mlvpn/mlvpn0.conf
@@ -1143,7 +1231,7 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -rf /tmp/glorytun-udp
 else
 	rm -f /usr/local/bin/glorytun
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun=${GLORYTUN_UDP_BINARY_VERSION}
+        install_omr_package "omr-glorytun" "${GLORYTUN_UDP_BINARY_VERSION}" "$OMR_GLORYTUN_DEB_FILE" "$OMR_GLORYTUN_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite" "--reinstall"
 	GLORYTUN_PASS="$(cat /etc/glorytun-udp/tun0.key | tr -d '\n')"
 fi
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
@@ -1189,7 +1277,7 @@ if [ "$DSVPN" = "yes" ]; then
 		cd /tmp
 		rm -rf /tmp/dsvpn
 	else
-		apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install omr-dsvpn=${DSVPN_BINARY_VERSION}
+                install_omr_package "omr-dsvpn" "${DSVPN_BINARY_VERSION}" "$OMR_DSVPN_DEB_FILE" "$OMR_DSVPN_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite"
 		DSVPN_PASS=$(cat /etc/dsvpn/dsvpn0.key | tr -d "\n")
 	fi
 	if [ "$UPSTREAM" = "yes" ]; then
@@ -1249,7 +1337,7 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -rf /tmp/glorytun-0.0.35
 else
 	rm -f /usr/local/bin/glorytun-tcp
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun-tcp=${GLORYTUN_TCP_BINARY_VERSION}
+        install_omr_package "omr-glorytun-tcp" "${GLORYTUN_TCP_BINARY_VERSION}" "$OMR_GLORYTUN_TCP_DEB_FILE" "$OMR_GLORYTUN_TCP_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite" "--reinstall"
 fi
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
 
@@ -1440,7 +1528,7 @@ else
 fi
 
 if [ "$SOURCES" != "yes" ]; then
-	apt-get -y install omr-server=${OMR_VERSION} 2>&1 >/dev/null || true
+        install_omr_package "omr-server" "${OMR_VERSION}" "$OMR_SERVER_DEB_FILE" "$OMR_SERVER_DEB_URL" >/dev/null 2>&1 || true
 	rm -f /etc/openmtpcprouter-vps-admin/update-bin
 fi
 
