@@ -325,8 +325,6 @@ else
         rm -f /etc/apt/preferences.d/openmptcprouter.pref
 fi
 
-#apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
-echo 'deb http://deb.debian.org/debian bullseye-backports main' > /etc/apt/sources.list.d/bullseye-backports.list
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
