@@ -83,6 +83,7 @@ ADMIN_DEB_URL="${ADMIN_DEB_URL:-https://github.com/Brazzo978/openmptcprouter-vps
 V2RAY_DEB_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/v2ray-4.43.0-amd64.deb"
 GLORYTUN_UDP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun_0.3.4-5_amd64.deb"
 GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
+DSVPN_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-dsvpn_0.1.4-2_amd64.deb"
 
 install_v2ray_from_url() {
     local url="${V2RAY_DEB_URL}"
@@ -1113,48 +1114,29 @@ apt-get install -y chrony
 systemctl enable chrony
 
 if [ "$DSVPN" = "yes" ]; then
-	echo 'A Dead Simple VPN'
-	# Install A Dead Simple VPN
-	if systemctl -q is-active dsvpn-server.service; then
-		systemctl -q disable dsvpn-server > /dev/null 2>&1
-		systemctl -q stop dsvpn-server > /dev/null 2>&1
-	fi
-	if [ "$SOURCES" = "yes" ]; then
-		rm -f /var/lib/dpkg/lock
-		rm -f /var/lib/dpkg/lock-frontend
-		apt-get install -y --no-install-recommends build-essential git ca-certificates
-		rm -rf /tmp/dsvpn
-		cd /tmp
-		git clone https://github.com/jedisct1/dsvpn.git /tmp/dsvpn
-		cd /tmp/dsvpn
-		git checkout ${DSVPN_VERSION}
-		wget https://github.com/Ysurac/openmptcprouter-feeds/raw/develop/dsvpn/patches/nofirewall.patch
-		patch -p1 < nofirewall.patch
-		make CFLAGS='-DNO_DEFAULT_ROUTES -DNO_DEFAULT_FIREWALL'
-		make install
-		rm -f /lib/systemd/system/dsvpn/*
-		wget -O /usr/local/bin/dsvpn-run ${VPSURL}${VPSPATH}/dsvpn-run
-		chmod 755 /usr/local/bin/dsvpn-run
-		wget -O /lib/systemd/system/dsvpn-server@.service ${VPSURL}${VPSPATH}/dsvpn-server%40.service.in
-		mkdir -p /etc/dsvpn
-		wget -O /etc/dsvpn/dsvpn0 ${VPSURL}${VPSPATH}/dsvpn0-config
-		if [ -f /etc/dsvpn/dsvpn.key ]; then
-			mv /etc/dsvpn/dsvpn.key /etc/dsvpn/dsvpn0.key
-		fi
-		if [ "$update" = "0" ] || [ ! -f /etc/dsvpn/dsvpn0.key ]; then
-			echo "$DSVPN_PASS" > /etc/dsvpn/dsvpn0.key
-		fi
-		systemctl enable dsvpn-server@dsvpn0.service
-		cd /tmp
-		rm -rf /tmp/dsvpn
-	else
-		apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install omr-dsvpn=${DSVPN_BINARY_VERSION}
-		DSVPN_PASS=$(cat /etc/dsvpn/dsvpn0.key | tr -d "\n")
-	fi
-	if [ "$UPSTREAM" = "yes" ]; then
-		mptcpize enable dsvpn-server@dsvpn0
-	fi
+    echo 'A Dead Simple VPN'
+
+    # stop/disable eventuali servizi attivi
+    if systemctl -q is-active dsvpn-server.service; then
+        systemctl -q disable dsvpn-server > /dev/null 2>&1
+        systemctl -q stop dsvpn-server > /dev/null 2>&1
+    fi
+
+    # Install .deb vendorizzato
+    install_deb_from_url "omr-dsvpn" "$DSVPN_URL"
+
+    # Assicura dir + chiave
+    mkdir -p /etc/dsvpn
+    if [ -f /etc/dsvpn/dsvpn0.key ]; then
+        : # già presente
+    else
+        echo "$DSVPN_PASS" > /etc/dsvpn/dsvpn0.key
+    fi
+
+    # abilita servizio 
+    systemctl enable dsvpn-server@dsvpn0.service
 fi
+
 
 # Install Glorytun TCP
 echo 'Glorytun TCP'
