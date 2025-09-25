@@ -214,7 +214,7 @@ if [ "$CHINA" = "yes" ]; then
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
 else
-        echo "deb [arch=amd64] https://${REPO} bullseye main" > /etc/apt/sources.list.d/openmptcprouter.list
+        echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
 	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
 		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
 		Package: *
@@ -236,8 +236,6 @@ else
 fi
 
 #apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
-# Add bullseye-backports repo
-echo 'deb http://deb.debian.org/debian bullseye-backports main' > /etc/apt/sources.list.d/bullseye-backports.list
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
