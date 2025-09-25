@@ -155,7 +155,14 @@ get_static_deb_url() {
 }
 
 LIBSHADOWSOCKS_LIBEV2_VERSION=${LIBSHADOWSOCKS_LIBEV2_VERSION:-$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION}
-LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb" "libshadowsocks-libev2_" "_amd64.deb")}
+LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE="libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb"
+LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "$LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE" "libshadowsocks-libev2_" "_amd64.deb")}
+if [ "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE" = "$LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE" ] && [ ! -f "${DIR}/Pack/${LIBSHADOWSOCKS_LIBEV2_DEB_FILE}" ]; then
+    alt_libshadowsocks_libev2_file=$(select_static_deb_file "omr-libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb" "omr-libshadowsocks-libev2_" "_amd64.deb")
+    if [ -n "$alt_libshadowsocks_libev2_file" ]; then
+        LIBSHADOWSOCKS_LIBEV2_DEB_FILE="$alt_libshadowsocks_libev2_file"
+    fi
+fi
 LIBSHADOWSOCKS_LIBEV2_DEB_URL=${LIBSHADOWSOCKS_LIBEV2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE")}
 
 install_omr_package() {
