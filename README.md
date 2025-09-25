@@ -1,3 +1,19 @@
+
+This fork focuses on bringing back the ability for all the user to install previus version of the vps script , to get full compatibility with older client with version 0.59.1 this uses the original package from 1028-era vps installation script , some provided by the openmptcprouter repo and some from this fork in the pack folder.
+
+Currently the only thing changed from the original 1028 stock is the glorytun tcp version , from omr-glorytun-tcp_0.0.35-3_amd64.deb to omr-glorytun-tcp_0.0.35-6_amd64.deb which is the latest , if problems arise i will patch to use the original one.
+
+The script has been fully cleaned from useless feature like upstream kernel.
+The script now runs only and i say ONLY on debian 11 by default , it will not run on debian 12 or later , or debian 10/9 , because upgrading from those older version made use of dead dependencies and is now harder , so get a vps with debian 11 already and this will work.
+
+To install just Run this command.
+> ```bash
+> curl -sL https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1028-def/debian9-x86_64.sh | bash
+> ```
+
+
+
+REGULAR INSTALL STUFF : 
 # OpenMPTCProuter VPS scripts
 
 All scripts needed to install OpenMPTCProuter VPS.
@@ -25,6 +41,3 @@ This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), a s
 * ```tun0.glorytun```: glorytun default configuration
 * ```tun0.glorytun-udp```: glorytun default configuration
 * ```update-grub.sh```: Script used to check if MPTCP kernel is the default
-
-
-This fork focuses on bringing back the ability for all the user to install previus version of the vps script , to get full compatibility with older client.
