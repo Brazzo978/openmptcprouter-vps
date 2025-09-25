@@ -111,70 +111,6 @@ install_omr_admin_from_url() {
     echo "omr-vps-admin installed from custom URL."
 }
 
-install_deb_from_url() {
-  set -euo pipefail
-  local pkgname="$1"   # es: omr-glorytun
-  local url="$2"
-  local tmpdir pkgfile want_ver cur_ver
-
-  # prerequisiti minimi
-  apt-get update
-  apt-get install -y --no-install-recommends ca-certificates wget apt-transport-https
-
-  tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
-  pkgfile="$tmpdir/pkg.deb"
-
-  echo "[INFO] Scarico $pkgname da: $url"
-  # retry robusto
-  for i in 1 2 3; do
-    if wget -q --show-progress -O "$pkgfile" "$url"; then
-      break
-    fi
-    echo "[WARN] download fallito (tentativo $i), ritento tra 2s..."
-    sleep 2
-  done
-
-  # estraggo versione desiderata dal .deb
-  want_ver="$(dpkg-deb -f "$pkgfile" Version 2>/dev/null || true)"
-  if [ -z "${want_ver:-}" ]; then
-    echo "[ERR] impossibile leggere la Version dal pacchetto $pkgname" >&2
-    exit 1
-  fi
-
-  # versione attualmente installata (se esiste)
-  cur_ver="$(dpkg-query -W -f='${Version}' "$pkgname" 2>/dev/null || true)"
-
-  if [ "$FORCE_REINSTALL" != "yes" ] && [ -n "$cur_ver" ] && dpkg --compare-versions "$cur_ver" ge "$want_ver"; then
-    echo "[INFO] $pkgname già installato (versione $cur_ver >= $want_ver). Skip."
-    return 0
-  fi
-
-  echo "[INFO] Installo $pkgname $want_ver (current: ${cur_ver:-none}) con risoluzione dipendenze"
-  # pre-installa dipendenze dichiarate (best effort, utile su sistemi molto minimali)
-  deps="$(dpkg-deb -f "$pkgfile" Depends 2>/dev/null | sed 's/([^)]*)//g;s/,//g' | tr -s ' ' '\n' | awk NF || true)"
-  if [ -n "${deps:-}" ]; then
-    # rimuovi versioni opzionali tipo "A | B"
-    clean_deps="$(echo "$deps" | awk -F'|' '{print $1}' | xargs -r)"
-    [ -n "${clean_deps:-}" ] && apt-get install -y --no-install-recommends $clean_deps || true
-  fi
-
-  # usa apt sul file .deb per tirare eventuali dipendenze mancanti
-  if ! apt-get install -y --no-install-recommends "$pkgfile"; then
-    echo "[WARN] primo tentativo fallito, provo fix dipendenze"
-    apt-get -y -f install || true
-    apt-get install -y --no-install-recommends "$pkgfile"
-  fi
-
-  # verifica stato finale
-  if ! dpkg-query -W -f='${Status}\n' "$pkgname" 2>/dev/null | grep -q 'install ok installed'; then
-    echo "[ERR] $pkgname non risulta installato correttamente" >&2
-    dpkg -l | grep -E "^ii\s+$pkgname" || true
-    exit 1
-  fi
-
-  echo "[OK] $pkgname $want_ver installato correttamente"
-}
-
 # Impedisci ai postinst di avviare servizi durante l’install
 install_block_service_starts() {
   mkdir -p /usr/sbin
@@ -1162,7 +1098,30 @@ fi
 [ -f /etc/glorytun-udp/tun0 ] || echo "keyfile=/etc/glorytun-udp/tun0.key" >/etc/glorytun-udp/tun0
 
 # 3) Installa il .deb vendorizzato (risolve dipendenze da solo)
-install_deb_from_url "omr-glorytun" "$GLORYTUN_UDP_URL"
+GLORYTUN_UDP_DEB="/tmp/$(basename "$GLORYTUN_UDP_URL")"
+GLORYTUN_UDP_SKIP="no"
+if [ "$FORCE_REINSTALL" != "yes" ]; then
+  CUR_GLORYTUN_UDP="$(dpkg-query -W -f='${Version}' omr-glorytun 2>/dev/null || true)"
+  if [ -n "$CUR_GLORYTUN_UDP" ] && dpkg --compare-versions "$CUR_GLORYTUN_UDP" ge "$GLORYTUN_UDP_BINARY_VERSION"; then
+    echo "[INFO] omr-glorytun già installato (versione $CUR_GLORYTUN_UDP >= $GLORYTUN_UDP_BINARY_VERSION). Skip."
+    GLORYTUN_UDP_SKIP="yes"
+  fi
+fi
+if [ "$GLORYTUN_UDP_SKIP" != "yes" ]; then
+  echo "[INFO] Scarico omr-glorytun da: $GLORYTUN_UDP_URL"
+  if ! curl -fsSL --retry 3 --retry-delay 2 -o "$GLORYTUN_UDP_DEB" "$GLORYTUN_UDP_URL"; then
+    wget -qO "$GLORYTUN_UDP_DEB" "$GLORYTUN_UDP_URL"
+  fi
+  if [ ! -s "$GLORYTUN_UDP_DEB" ]; then
+    echo "[ERR] download di omr-glorytun fallito ($GLORYTUN_UDP_URL)" >&2
+    exit 1
+  fi
+  if ! dpkg -i "$GLORYTUN_UDP_DEB"; then
+    apt-get -f -y install
+    dpkg -i "$GLORYTUN_UDP_DEB"
+  fi
+fi
+rm -f "$GLORYTUN_UDP_DEB"
 
 # 4) Riabilita avvio servizi
 install_unblock_service_starts
@@ -1202,7 +1161,30 @@ if [ "$DSVPN" = "yes" ]; then
   [ -f /etc/dsvpn/dsvpn0.key ] || echo "$DSVPN_PASS" >/etc/dsvpn/dsvpn0.key
   [ -f /etc/dsvpn/dsvpn0 ] || echo "keyfile=/etc/dsvpn/dsvpn0.key" >/etc/dsvpn/dsvpn0
 
-  install_deb_from_url "omr-dsvpn" "$DSVPN_URL"
+  DSVPN_DEB="/tmp/$(basename "$DSVPN_URL")"
+  DSVPN_SKIP="no"
+  if [ "$FORCE_REINSTALL" != "yes" ]; then
+    CUR_DSVPN="$(dpkg-query -W -f='${Version}' omr-dsvpn 2>/dev/null || true)"
+    if [ -n "$CUR_DSVPN" ] && dpkg --compare-versions "$CUR_DSVPN" ge "$DSVPN_BINARY_VERSION"; then
+      echo "[INFO] omr-dsvpn già installato (versione $CUR_DSVPN >= $DSVPN_BINARY_VERSION). Skip."
+      DSVPN_SKIP="yes"
+    fi
+  fi
+  if [ "$DSVPN_SKIP" != "yes" ]; then
+    echo "[INFO] Scarico omr-dsvpn da: $DSVPN_URL"
+    if ! curl -fsSL --retry 3 --retry-delay 2 -o "$DSVPN_DEB" "$DSVPN_URL"; then
+      wget -qO "$DSVPN_DEB" "$DSVPN_URL"
+    fi
+    if [ ! -s "$DSVPN_DEB" ]; then
+      echo "[ERR] download di omr-dsvpn fallito ($DSVPN_URL)" >&2
+      exit 1
+    fi
+    if ! dpkg -i "$DSVPN_DEB"; then
+      apt-get -f -y install
+      dpkg -i "$DSVPN_DEB"
+    fi
+  fi
+  rm -f "$DSVPN_DEB"
 
   install_unblock_service_starts
 
@@ -1234,7 +1216,30 @@ else
 fi
 [ -f /etc/glorytun-tcp/tun0 ] || echo "keyfile=/etc/glorytun-tcp/tun0.key" >/etc/glorytun-tcp/tun0
 
-install_deb_from_url "omr-glorytun-tcp" "$GLORYTUN_TCP_URL"
+GLORYTUN_TCP_DEB="/tmp/$(basename "$GLORYTUN_TCP_URL")"
+GLORYTUN_TCP_SKIP="no"
+if [ "$FORCE_REINSTALL" != "yes" ]; then
+  CUR_GLORYTUN_TCP="$(dpkg-query -W -f='${Version}' omr-glorytun-tcp 2>/dev/null || true)"
+  if [ -n "$CUR_GLORYTUN_TCP" ] && dpkg --compare-versions "$CUR_GLORYTUN_TCP" ge "$GLORYTUN_TCP_BINARY_VERSION"; then
+    echo "[INFO] omr-glorytun-tcp già installato (versione $CUR_GLORYTUN_TCP >= $GLORYTUN_TCP_BINARY_VERSION). Skip."
+    GLORYTUN_TCP_SKIP="yes"
+  fi
+fi
+if [ "$GLORYTUN_TCP_SKIP" != "yes" ]; then
+  echo "[INFO] Scarico omr-glorytun-tcp da: $GLORYTUN_TCP_URL"
+  if ! curl -fsSL --retry 3 --retry-delay 2 -o "$GLORYTUN_TCP_DEB" "$GLORYTUN_TCP_URL"; then
+    wget -qO "$GLORYTUN_TCP_DEB" "$GLORYTUN_TCP_URL"
+  fi
+  if [ ! -s "$GLORYTUN_TCP_DEB" ]; then
+    echo "[ERR] download di omr-glorytun-tcp fallito ($GLORYTUN_TCP_URL)" >&2
+    exit 1
+  fi
+  if ! dpkg -i "$GLORYTUN_TCP_DEB"; then
+    apt-get -f -y install
+    dpkg -i "$GLORYTUN_TCP_DEB"
+  fi
+fi
+rm -f "$GLORYTUN_TCP_DEB"
 
 install_unblock_service_starts
 
