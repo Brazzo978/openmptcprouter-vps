@@ -77,6 +77,23 @@ if [ "$UPSTREAM" = "yes" ]; then
 fi
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
+LIBJSON_C3_VERSION="0.12.1+ds-2"
+LIBSODIUM18_VERSION="1.0.13-1"
+LIBUV1_VERSION="1.34.2-1"
+PYTHON3_FLASK_VERSION="1.0.2"
+PYTHON3_FLASK_JWT_SIMPLE_VERSION="0.0.3"
+PYTHON3_ITSDANGEROUS_VERSION="1.1.0"
+PYTHON3_JINJA2_VERSION="2.10"
+PYTHON3_MARKUPSAFE_VERSION="1.1.1"
+PYTHON3_PYJWT_VERSION="1.7.1"
+PYTHON3_UVICORN_VERSION="0.11.5-1"
+PYTHON3_UVLOOP_VERSION="0.14.0+ds1-1"
+PYTHON3_WATCHGOD_VERSION="0.6-1"
+PYTHON3_WERKZEUG_VERSION="0.15.1"
+OMR_LIBIPERF0_BINARY_VERSION="3.7-2"
+OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION="3.3.5-3"
+OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION="3.3.5-3"
+OPENVPN_BINARY_VERSION="2.6.14-1"
 DEFAULT_USER="openmptcprouter"
 VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
 VPSPATH="server"
@@ -89,6 +106,46 @@ OMR_VERSION="0.1028"
 
 DIR=$( pwd )
 #"
+find_latest_pack_file() {
+    prefix="$1"
+    suffix="$2"
+    best=""
+    best_version=""
+    if [ -d "${DIR}/Pack" ]; then
+        for path in "${DIR}/Pack/"*; do
+            [ -f "$path" ] || continue
+            file=${path##*/}
+            case "$file" in
+                ${prefix}*${suffix})
+                    version=${file#${prefix}}
+                    version=${version%${suffix}}
+                    if [ -z "$best" ] || dpkg --compare-versions "$version" gt "$best_version"; then
+                        best="$file"
+                        best_version="$version"
+                    fi
+                ;;
+            esac
+        done
+    fi
+    printf "%s" "$best"
+}
+
+select_static_deb_file() {
+    default="$1"
+    prefix="$2"
+    suffix="$3"
+    if [ -n "$default" ] && [ -f "${DIR}/Pack/${default}" ]; then
+        printf "%s" "$default"
+        return
+    fi
+    alt=$(find_latest_pack_file "$prefix" "$suffix")
+    if [ -n "$alt" ]; then
+        printf "%s" "$alt"
+        return
+    fi
+    printf "%s" "$default"
+}
+
 get_static_deb_url() {
     base="$1"
     file="$2"
@@ -126,7 +183,9 @@ install_omr_package() {
         return 1
     fi
     if [ -n "$version" ]; then
-        apt-get -y "$@" install "${pkg}=${version}"
+        if ! apt-get -y "$@" install "${pkg}=${version}"; then
+            apt-get -y "$@" install "${pkg}"
+        fi
     else
         apt-get -y "$@" install "${pkg}"
     fi
@@ -136,12 +195,44 @@ LINUX_IMAGE_DEB_FILE=${LINUX_IMAGE_DEB_FILE:-linux-image-${KERNEL_RELEASE}_amd64
 LINUX_IMAGE_DEB_URL=${LINUX_IMAGE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_IMAGE_DEB_FILE")}
 LINUX_HEADERS_DEB_FILE=${LINUX_HEADERS_DEB_FILE:-linux-headers-${KERNEL_RELEASE}_amd64.deb}
 LINUX_HEADERS_DEB_URL=${LINUX_HEADERS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_HEADERS_DEB_FILE")}
-TRACEBOX_DEB_FILE=${TRACEBOX_DEB_FILE:-}
+LIBJSON_C3_DEB_FILE=${LIBJSON_C3_DEB_FILE:-$(select_static_deb_file "libjson-c3_${LIBJSON_C3_VERSION}_amd64.deb" "libjson-c3_" "_amd64.deb")}
+LIBJSON_C3_DEB_URL=${LIBJSON_C3_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBJSON_C3_DEB_FILE")}
+LIBSODIUM18_DEB_FILE=${LIBSODIUM18_DEB_FILE:-$(select_static_deb_file "libsodium18_${LIBSODIUM18_VERSION}_amd64.deb" "libsodium18_" "_amd64.deb")}
+LIBSODIUM18_DEB_URL=${LIBSODIUM18_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBSODIUM18_DEB_FILE")}
+LIBUV1_DEB_FILE=${LIBUV1_DEB_FILE:-$(select_static_deb_file "libuv1_${LIBUV1_VERSION}_amd64.deb" "libuv1_" "_amd64.deb")}
+LIBUV1_DEB_URL=${LIBUV1_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBUV1_DEB_FILE")}
+TRACEBOX_DEB_FILE=${TRACEBOX_DEB_FILE:-tracebox_0.4.4_amd64.deb}
 TRACEBOX_DEB_URL=${TRACEBOX_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$TRACEBOX_DEB_FILE")}
-OMR_IPERF3_DEB_FILE=${OMR_IPERF3_DEB_FILE:-}
+OMR_IPERF3_DEB_FILE=${OMR_IPERF3_DEB_FILE:-omr-iperf3_3.7-2_amd64.deb}
 OMR_IPERF3_DEB_URL=${OMR_IPERF3_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_IPERF3_DEB_FILE")}
+OMR_LIBIPERF0_DEB_FILE=${OMR_LIBIPERF0_DEB_FILE:-$(select_static_deb_file "omr-libiperf0_${OMR_LIBIPERF0_BINARY_VERSION}_amd64.deb" "omr-libiperf0_" "_amd64.deb")}
+OMR_LIBIPERF0_DEB_URL=${OMR_LIBIPERF0_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBIPERF0_DEB_FILE")}
 OMR_SHADOWSOCKS_DEB_FILE=${OMR_SHADOWSOCKS_DEB_FILE:-omr-shadowsocks-libev_${SHADOWSOCKS_BINARY_VERSION}_amd64.deb}
 OMR_SHADOWSOCKS_DEB_URL=${OMR_SHADOWSOCKS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SHADOWSOCKS_DEB_FILE")}
+OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "omr-libshadowsocks-libev2_${OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION}_amd64.deb" "omr-libshadowsocks-libev2_" "_amd64.deb")}
+OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL=${OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE")}
+OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE=${OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE:-$(select_static_deb_file "omr-libshadowsocks-libev-dev_${OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION}_amd64.deb" "omr-libshadowsocks-libev-dev_" "_amd64.deb")}
+OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL=${OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE")}
+PYTHON3_FLASK_DEB_FILE=${PYTHON3_FLASK_DEB_FILE:-$(select_static_deb_file "python3-flask_${PYTHON3_FLASK_VERSION}_all.deb" "python3-flask_" "_all.deb")}
+PYTHON3_FLASK_DEB_URL=${PYTHON3_FLASK_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_FLASK_DEB_FILE")}
+PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE=${PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE:-$(select_static_deb_file "python3-flask-jwt-simple_${PYTHON3_FLASK_JWT_SIMPLE_VERSION}_all.deb" "python3-flask-jwt-simple_" "_all.deb")}
+PYTHON3_FLASK_JWT_SIMPLE_DEB_URL=${PYTHON3_FLASK_JWT_SIMPLE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE")}
+PYTHON3_ITSDANGEROUS_DEB_FILE=${PYTHON3_ITSDANGEROUS_DEB_FILE:-$(select_static_deb_file "python3-itsdangerous_${PYTHON3_ITSDANGEROUS_VERSION}_all.deb" "python3-itsdangerous_" "_all.deb")}
+PYTHON3_ITSDANGEROUS_DEB_URL=${PYTHON3_ITSDANGEROUS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_ITSDANGEROUS_DEB_FILE")}
+PYTHON3_JINJA2_DEB_FILE=${PYTHON3_JINJA2_DEB_FILE:-$(select_static_deb_file "python3-jinja2_${PYTHON3_JINJA2_VERSION}_all.deb" "python3-jinja2_" "_all.deb")}
+PYTHON3_JINJA2_DEB_URL=${PYTHON3_JINJA2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_JINJA2_DEB_FILE")}
+PYTHON3_MARKUPSAFE_DEB_FILE=${PYTHON3_MARKUPSAFE_DEB_FILE:-$(select_static_deb_file "python3-markupsafe_${PYTHON3_MARKUPSAFE_VERSION}_amd64.deb" "python3-markupsafe_" "_amd64.deb")}
+PYTHON3_MARKUPSAFE_DEB_URL=${PYTHON3_MARKUPSAFE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_MARKUPSAFE_DEB_FILE")}
+PYTHON3_PYJWT_DEB_FILE=${PYTHON3_PYJWT_DEB_FILE:-$(select_static_deb_file "python3-pyjwt_${PYTHON3_PYJWT_VERSION}_all.deb" "python3-pyjwt_" "_all.deb")}
+PYTHON3_PYJWT_DEB_URL=${PYTHON3_PYJWT_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_PYJWT_DEB_FILE")}
+PYTHON3_UVICORN_DEB_FILE=${PYTHON3_UVICORN_DEB_FILE:-$(select_static_deb_file "python3-uvicorn_${PYTHON3_UVICORN_VERSION}_all.deb" "python3-uvicorn_" "_all.deb")}
+PYTHON3_UVICORN_DEB_URL=${PYTHON3_UVICORN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_UVICORN_DEB_FILE")}
+PYTHON3_UVLOOP_DEB_FILE=${PYTHON3_UVLOOP_DEB_FILE:-$(select_static_deb_file "python3-uvloop_${PYTHON3_UVLOOP_VERSION}_amd64.deb" "python3-uvloop_" "_amd64.deb")}
+PYTHON3_UVLOOP_DEB_URL=${PYTHON3_UVLOOP_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_UVLOOP_DEB_FILE")}
+PYTHON3_WATCHGOD_DEB_FILE=${PYTHON3_WATCHGOD_DEB_FILE:-$(select_static_deb_file "python3-watchgod_${PYTHON3_WATCHGOD_VERSION}_all.deb" "python3-watchgod_" "_all.deb")}
+PYTHON3_WATCHGOD_DEB_URL=${PYTHON3_WATCHGOD_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_WATCHGOD_DEB_FILE")}
+PYTHON3_WERKZEUG_DEB_FILE=${PYTHON3_WERKZEUG_DEB_FILE:-$(select_static_deb_file "python3-werkzeug_${PYTHON3_WERKZEUG_VERSION}_all.deb" "python3-werkzeug_" "_all.deb")}
+PYTHON3_WERKZEUG_DEB_URL=${PYTHON3_WERKZEUG_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_WERKZEUG_DEB_FILE")}
 OMR_VPS_ADMIN_DEB_FILE=${OMR_VPS_ADMIN_DEB_FILE:-omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb}
 OMR_VPS_ADMIN_DEB_URL=${OMR_VPS_ADMIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_VPS_ADMIN_DEB_FILE")}
 OMR_SIMPLE_OBFS_DEB_FILE=${OMR_SIMPLE_OBFS_DEB_FILE:-omr-simple-obfs_${OBFS_BINARY_VERSION}_amd64.deb}
@@ -158,8 +249,10 @@ V2RAY_DEB_FILE=${V2RAY_DEB_FILE:-v2ray-${V2RAY_VERSION}-amd64.deb}
 V2RAY_DEB_URL=${V2RAY_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_DEB_FILE")}
 V2RAY_PLUGIN_DEB_FILE=${V2RAY_PLUGIN_DEB_FILE:-v2ray-plugin_${V2RAY_PLUGIN_VERSION}_amd64.deb}
 V2RAY_PLUGIN_DEB_URL=${V2RAY_PLUGIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_PLUGIN_DEB_FILE")}
-OMR_SERVER_DEB_FILE=${OMR_SERVER_DEB_FILE:-omr-server_${OMR_VERSION}_all.deb}
+OMR_SERVER_DEB_FILE=${OMR_SERVER_DEB_FILE:-$(select_static_deb_file "omr-server_${OMR_VERSION}_all.deb" "omr-server_" "_all.deb")}
 OMR_SERVER_DEB_URL=${OMR_SERVER_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SERVER_DEB_FILE")}
+OPENVPN_DEB_FILE=${OPENVPN_DEB_FILE:-$(select_static_deb_file "openvpn_${OPENVPN_BINARY_VERSION}_amd64.deb" "openvpn_" "_amd64.deb")}
+OPENVPN_DEB_URL=${OPENVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OPENVPN_DEB_FILE")}
 
 set -e
 umask 0022
@@ -395,8 +488,10 @@ bash update-grub.sh ${KERNEL_RELEASE}
 [ -f /boot/grub/grub.cfg ] && sed -i 's/default="1>0"/default="0"/' /boot/grub/grub.cfg 2>&1 >/dev/null
 
 echo "Install tracebox OpenMPTCProuter edition"
+install_omr_package "libjson-c3" "$LIBJSON_C3_VERSION" "$LIBJSON_C3_DEB_FILE" "$LIBJSON_C3_DEB_URL" "--allow-downgrades"
 install_omr_package "tracebox" "" "$TRACEBOX_DEB_FILE" "$TRACEBOX_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 echo "Install iperf3 OpenMPTCProuter edition"
+install_omr_package "omr-libiperf0" "$OMR_LIBIPERF0_BINARY_VERSION" "$OMR_LIBIPERF0_DEB_FILE" "$OMR_LIBIPERF0_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 install_omr_package "omr-iperf3" "" "$OMR_IPERF3_DEB_FILE" "$OMR_IPERF3_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 
 if [ "$UPSTREAM" = "yes" ]; then
@@ -498,6 +593,9 @@ if [ "$SOURCES" = "yes" ]; then
 	#rm -rf /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	rm -rf /tmp/shadowsocks-libev
 else
+        install_omr_package "libsodium18" "$LIBSODIUM18_VERSION" "$LIBSODIUM18_DEB_FILE" "$LIBSODIUM18_DEB_URL" "--allow-downgrades"
+        install_omr_package "omr-libshadowsocks-libev2" "$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
+        install_omr_package "omr-libshadowsocks-libev-dev" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
         install_omr_package "omr-shadowsocks-libev" "${SHADOWSOCKS_BINARY_VERSION}" "$OMR_SHADOWSOCKS_DEB_FILE" "$OMR_SHADOWSOCKS_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
 fi
 
@@ -553,11 +651,22 @@ fi
 if [ "$OMR_ADMIN" = "yes" ]; then
         echo 'Install OpenMPTCProuter VPS Admin'
         apt-get -y install python3-openssl python3-pip python3-setuptools python3-wheel python3-dev
-	#apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
-	#apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
-        apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
+        #apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
+        #apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
+        install_omr_package "libuv1" "$LIBUV1_VERSION" "$LIBUV1_DEB_FILE" "$LIBUV1_DEB_URL" "--allow-downgrades"
+        apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr
+        install_omr_package "python3-flask" "$PYTHON3_FLASK_VERSION" "$PYTHON3_FLASK_DEB_FILE" "$PYTHON3_FLASK_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-flask-jwt-simple" "$PYTHON3_FLASK_JWT_SIMPLE_VERSION" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-itsdangerous" "$PYTHON3_ITSDANGEROUS_VERSION" "$PYTHON3_ITSDANGEROUS_DEB_FILE" "$PYTHON3_ITSDANGEROUS_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-jinja2" "$PYTHON3_JINJA2_VERSION" "$PYTHON3_JINJA2_DEB_FILE" "$PYTHON3_JINJA2_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-markupsafe" "$PYTHON3_MARKUPSAFE_VERSION" "$PYTHON3_MARKUPSAFE_DEB_FILE" "$PYTHON3_MARKUPSAFE_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-pyjwt" "$PYTHON3_PYJWT_VERSION" "$PYTHON3_PYJWT_DEB_FILE" "$PYTHON3_PYJWT_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-uvicorn" "$PYTHON3_UVICORN_VERSION" "$PYTHON3_UVICORN_DEB_FILE" "$PYTHON3_UVICORN_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-uvloop" "$PYTHON3_UVLOOP_VERSION" "$PYTHON3_UVLOOP_DEB_FILE" "$PYTHON3_UVLOOP_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-watchgod" "$PYTHON3_WATCHGOD_VERSION" "$PYTHON3_WATCHGOD_DEB_FILE" "$PYTHON3_WATCHGOD_DEB_URL" "--allow-downgrades"
+        install_omr_package "python3-werkzeug" "$PYTHON3_WERKZEUG_VERSION" "$PYTHON3_WERKZEUG_DEB_FILE" "$PYTHON3_WERKZEUG_DEB_URL" "--allow-downgrades"
         pip3 -q install uvloop
-	apt-get -y --allow-downgrades install python3-uvicorn jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
+        apt-get -y --allow-downgrades install jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
 	echo '-- pip3 install needed python modules'
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
 	#pip3 install pyjwt passlib uvicorn fastapi netjsonconfig python-multipart netaddr
@@ -975,7 +1084,8 @@ if [ "$OPENVPN" = "yes" ]; then
 	echo "Install OpenVPN"
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
-	apt-get -y install openvpn easy-rsa
+        install_omr_package "openvpn" "$OPENVPN_BINARY_VERSION" "$OPENVPN_DEB_FILE" "$OPENVPN_DEB_URL" "--allow-downgrades"
+        apt-get -y install easy-rsa
 	#wget -O /lib/systemd/network/openvpn.network ${VPSURL}${VPSPATH}/openvpn.network
 	rm -f /lib/systemd/network/openvpn.network
 	#if [ ! -f "/etc/openvpn/server/static.key" ]; then
