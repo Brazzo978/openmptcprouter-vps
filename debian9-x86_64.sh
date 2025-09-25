@@ -175,6 +175,22 @@ install_deb_from_url() {
   echo "[OK] $pkgname $want_ver installato correttamente"
 }
 
+# Impedisci ai postinst di avviare servizi durante l’install
+install_block_service_starts() {
+  mkdir -p /usr/sbin
+  cat >/usr/sbin/policy-rc.d <<'EOF'
+#!/bin/sh
+# 101 = action not allowed (usato da invoke-rc.d/deb-systemd-invoke)
+exit 101
+EOF
+  chmod +x /usr/sbin/policy-rc.d
+}
+
+# Riabilita l’avvio servizi
+install_unblock_service_starts() {
+  rm -f /usr/sbin/policy-rc.d
+}
+
 
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
@@ -1124,91 +1140,116 @@ if [ "$OPENVPN" = "yes" ]; then
 fi
 
 echo 'Glorytun UDP'
-# stop eventuali servizi attivi
+
+# stop eventuali istanze
 if systemctl -q is-active glorytun-udp@tun0.service; then
-    systemctl -q stop 'glorytun-udp@*' > /dev/null 2>&1
+  systemctl -q stop 'glorytun-udp@*' >/dev/null 2>&1
 fi
 
 rm -f /usr/local/bin/glorytun
 
-# Installa omr-glorytun dal .deb della tua fork
-install_deb_from_url "omr-glorytun" "$GLORYTUN_UDP_URL"
+# 1) NON far partire servizi durante l’install
+install_block_service_starts
 
-# Assicura chiave e variabile GLORYTUN_PASS
+# 2) Prepara directory + chiave PRIMA (il postinst le può volere)
 mkdir -p /etc/glorytun-udp
 if [ -f /etc/glorytun-udp/tun0.key ]; then
-    GLORYTUN_PASS="$(tr -d '\n' </etc/glorytun-udp/tun0.key)"
+  GLORYTUN_PASS="$(tr -d '\n' </etc/glorytun-udp/tun0.key)"
 else
-    echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
+  echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
 fi
+# placeholder di config per non far fallire il postinst se controlla il file
+[ -f /etc/glorytun-udp/tun0 ] || echo "keyfile=/etc/glorytun-udp/tun0.key" >/etc/glorytun-udp/tun0
 
+# 3) Installa il .deb vendorizzato (risolve dipendenze da solo)
+install_deb_from_url "omr-glorytun" "$GLORYTUN_UDP_URL"
+
+# 4) Riabilita avvio servizi
+install_unblock_service_starts
+
+# 5) (opzionale) Sovrascrivi con la tua config reale se la hai in repo/dir
+if [ "$LOCALFILES" = "no" ]; then
+  # adatta se il path è diverso nella tua fork
+  wget -q -O /etc/glorytun-udp/tun0 "${VPSURL}${VPSPATH}/tun0.glorytun-udp" || true
+else
+  [ -f "${DIR}/tun0.glorytun-udp" ] && cp "${DIR}/tun0.glorytun-udp" /etc/glorytun-udp/tun0
+fi
+chmod 600 /etc/glorytun-udp/tun0.key
+
+# 6) Abilita (avviare SOLO quando la config è ok)
 systemctl enable glorytun-udp@tun0.service
-systemctl enable systemd-networkd.service
+# systemctl start glorytun-udp@tun0.service || echo "[WARN] Non avviato: verifica /etc/glorytun-udp/tun0"
 
+# IPv6: se presente, sostituisci 0.0.0.0 con ::
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
+
 
 # Add chrony for time sync
 apt-get install -y chrony
 systemctl enable chrony
 
 if [ "$DSVPN" = "yes" ]; then
-    echo 'A Dead Simple VPN'
+  echo 'A Dead Simple VPN'
 
-    # stop/disable eventuali servizi attivi
-    if systemctl -q is-active dsvpn-server.service; then
-        systemctl -q disable dsvpn-server > /dev/null 2>&1
-        systemctl -q stop dsvpn-server > /dev/null 2>&1
-    fi
+  if systemctl -q is-active dsvpn-server.service; then
+    systemctl -q disable dsvpn-server >/dev/null 2>&1
+    systemctl -q stop dsvpn-server >/dev/null 2>&1
+  fi
 
-    # Install .deb vendorizzato
-    install_deb_from_url "omr-dsvpn" "$DSVPN_URL"
+  install_block_service_starts
 
-    # Assicura dir + chiave
-    mkdir -p /etc/dsvpn
-    if [ -f /etc/dsvpn/dsvpn0.key ]; then
-        : # già presente
-    else
-        echo "$DSVPN_PASS" > /etc/dsvpn/dsvpn0.key
-    fi
+  mkdir -p /etc/dsvpn
+  [ -f /etc/dsvpn/dsvpn0.key ] || echo "$DSVPN_PASS" >/etc/dsvpn/dsvpn0.key
+  [ -f /etc/dsvpn/dsvpn0 ] || echo "keyfile=/etc/dsvpn/dsvpn0.key" >/etc/dsvpn/dsvpn0
 
-    # abilita servizio 
-    systemctl enable dsvpn-server@dsvpn0.service
+  install_deb_from_url "omr-dsvpn" "$DSVPN_URL"
+
+  install_unblock_service_starts
+
+  systemctl enable dsvpn-server@dsvpn0.service
+  # systemctl start dsvpn-server@dsvpn0.service || echo "[WARN] Non avviato: verifica /etc/dsvpn/dsvpn0"
+
+  [ "$UPSTREAM" = "yes" ] && mptcpize enable dsvpn-server@dsvpn0
 fi
 
 
-# Install Glorytun TCP
+
 echo 'Glorytun TCP'
-# stop eventuali servizi attivi
-if systemctl -q is-active glorytun-tcp@tun0.service; then
-    systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
-fi
 
-# rimuovi eventuale binario custom vecchio
+if systemctl -q is-active glorytun-tcp@tun0.service; then
+  systemctl -q stop 'glorytun-tcp@*' >/dev/null 2>&1
+fi
 rm -f /usr/local/bin/glorytun-tcp
 
-# Installa omr-glorytun-tcp dal .deb vendorizzato (GitHub)
-# richiede che in cima allo script tu abbia:
-#   GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
-# e la funzione install_deb_from_url già definita
+install_block_service_starts
+
+mkdir -p /etc/glorytun-tcp
+# riusa la chiave UDP se esiste, altrimenti crea da variabile
+if [ -f /etc/glorytun-tcp/tun0.key ]; then
+  :
+elif [ -f /etc/glorytun-udp/tun0.key ]; then
+  cp /etc/glorytun-udp/tun0.key /etc/glorytun-tcp/tun0.key
+else
+  echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
+fi
+[ -f /etc/glorytun-tcp/tun0 ] || echo "keyfile=/etc/glorytun-tcp/tun0.key" >/etc/glorytun-tcp/tun0
+
 install_deb_from_url "omr-glorytun-tcp" "$GLORYTUN_TCP_URL"
 
-# Assicura directory e chiave
-mkdir -p /etc/glorytun-tcp
-if [ -f /etc/glorytun-tcp/tun0.key ]; then
-    : # già presente, non tocco
-elif [ -f /etc/glorytun-udp/tun0.key ]; then
-    # se esiste la chiave UDP, riusa per TCP
-    cp /etc/glorytun-udp/tun0.key /etc/glorytun-tcp/tun0.key
+install_unblock_service_starts
+
+if [ "$LOCALFILES" = "no" ]; then
+  wget -q -O /etc/glorytun-tcp/tun0 "${VPSURL}${VPSPATH}/tun0.glorytun" || true
 else
-    # altrimenti crea la chiave con GLORYTUN_PASS
-    echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
+  [ -f "${DIR}/tun0.glorytun" ] && cp "${DIR}/tun0.glorytun" /etc/glorytun-tcp/tun0
 fi
+chmod 600 /etc/glorytun-tcp/tun0.key
 
-# abilita servizio
 systemctl enable glorytun-tcp@tun0.service
+# systemctl start glorytun-tcp@tun0.service || echo "[WARN] Non avviato: verifica /etc/glorytun-tcp/tun0"
 
-# IPv6: se l'host ha IPv6, usa :: nei conf generici
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
+
 
 
 # Load tun module at boot time
