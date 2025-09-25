@@ -52,6 +52,7 @@ DSVPN_VERSION="3b99d2ef6c02b2ef68b5784bec8adfdd55b29b1a"
 DSVPN_BINARY_VERSION="0.1.4-2"
 V2RAY_VERSION="4.43.0"
 V2RAY_PLUGIN_VERSION="4.43.0"
+V2RAY_DEB_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/v2ray-${V2RAY_VERSION}-amd64.deb"
 EASYRSA_VERSION="3.0.6"
 SHADOWSOCKS_VERSION="7407b214f335f0e2068a8622ef3674d868218e17"
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
@@ -647,14 +648,11 @@ if systemctl -q is-active v2ray.service; then
 fi
 
 if [ "$V2RAY" = "yes" ]; then
-	#apt-get -y -o Dpkg::Options::="--force-overwrite" install v2ray
-	if [ "$SOURCES" = "yes" ]; then
-		wget -O /tmp/v2ray-${V2RAY_VERSION}-amd64.deb ${VPSURL}/debian/v2ray-${V2RAY_VERSION}-amd64.deb
-		dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
-		rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
-	else
-		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
-	fi
+        #apt-get -y -o Dpkg::Options::="--force-overwrite" install v2ray
+        wget -O /tmp/v2ray-${V2RAY_VERSION}-amd64.deb ${V2RAY_DEB_URL}
+        dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb || true
+        apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y -f install
+        rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
 	if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
 		sed -i "s:V2RAY_UUID:$V2RAY_UUID:g" /etc/v2ray/v2ray-server.json
