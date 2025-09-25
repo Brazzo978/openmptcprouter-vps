@@ -204,6 +204,13 @@ install_omr_package() {
         done
         if ! dpkg $dpkg_opts -i "$dest"; then
             rc=$?
+            if apt-get -y -f install; then
+                if dpkg $dpkg_opts -i "$dest"; then
+                    rc=0
+                else
+                    rc=$?
+                fi
+            fi
         else
             rc=0
         fi
