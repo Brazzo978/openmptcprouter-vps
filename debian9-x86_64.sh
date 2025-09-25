@@ -512,9 +512,11 @@ bash update-grub.sh ${KERNEL_RELEASE}
 [ -f /boot/grub/grub.cfg ] && sed -i 's/default="1>0"/default="0"/' /boot/grub/grub.cfg 2>&1 >/dev/null
 
 echo "Install tracebox OpenMPTCProuter edition"
+apt-get -y install liblua5.2-0 libpcap0.8 libnetfilter-queue1 libcurl4-gnutls-dev
 install_omr_package "libjson-c3" "$LIBJSON_C3_VERSION" "$LIBJSON_C3_DEB_FILE" "$LIBJSON_C3_DEB_URL" "--allow-downgrades"
 install_omr_package "tracebox" "" "$TRACEBOX_DEB_FILE" "$TRACEBOX_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 echo "Install iperf3 OpenMPTCProuter edition"
+apt-get -y install libsctp1
 install_omr_package "omr-libiperf0" "$OMR_LIBIPERF0_BINARY_VERSION" "$OMR_LIBIPERF0_DEB_FILE" "$OMR_LIBIPERF0_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 install_omr_package "omr-iperf3" "" "$OMR_IPERF3_DEB_FILE" "$OMR_IPERF3_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
 
