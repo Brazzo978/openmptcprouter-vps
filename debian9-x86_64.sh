@@ -93,6 +93,9 @@ PYTHON3_WERKZEUG_VERSION="0.15.1"
 OMR_LIBIPERF0_BINARY_VERSION="3.7-2"
 OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION="3.3.5-3"
 OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION="3.3.5-3"
+LIBSHADOWSOCKS_LIBEV2_VERSION=${LIBSHADOWSOCKS_LIBEV2_VERSION:-$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION}
+LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb" "libshadowsocks-libev2_" "_amd64.deb")}
+LIBSHADOWSOCKS_LIBEV2_DEB_URL=${LIBSHADOWSOCKS_LIBEV2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE")}
 OPENVPN_BINARY_VERSION="2.6.14-1"
 DEFAULT_USER="openmptcprouter"
 VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
@@ -173,25 +176,26 @@ install_omr_package() {
         wget -O "$dest" "$url"
     fi
     if [ -n "$dest" ]; then
-        if ! apt-get -y "$@" install "$dest"; then
-            # Try to resolve missing dependencies explicitly when the direct
-            # installation of the .deb fails (for example when installing
-            # packages downloaded from GitHub that are not part of any APT
-            # repository).
-            if dpkg -i "$dest"; then
-                rc=0
-            else
-                rc=$?
-                if apt-get -y "$@" -f install; then
-                    if dpkg -i "$dest"; then
-                        rc=0
-                    else
-                        rc=$?
-                    fi
-                else
-                    rc=$?
-                fi
-            fi
+        set -- "$@"
+        dpkg_opts=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -o)
+                    shift
+                    opt="$1"
+                    case "$opt" in
+                        Dpkg::Options::=--*)
+                            dpkg_opts="$dpkg_opts --${opt#Dpkg::Options::=--}"
+                            ;;
+                    esac
+                    ;;
+                *)
+                    ;;
+            esac
+            shift
+        done
+        if ! dpkg $dpkg_opts -i "$dest"; then
+            rc=$?
         else
             rc=0
         fi
@@ -203,9 +207,7 @@ install_omr_package() {
         return 1
     fi
     if [ -n "$version" ]; then
-        if ! apt-get -y "$@" install "${pkg}=${version}"; then
-            apt-get -y "$@" install "${pkg}"
-        fi
+        apt-get -y "$@" install "${pkg}=${version}"
     else
         apt-get -y "$@" install "${pkg}"
     fi
@@ -615,6 +617,7 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -rf /tmp/shadowsocks-libev
 else
         install_omr_package "libsodium18" "$LIBSODIUM18_VERSION" "$LIBSODIUM18_DEB_FILE" "$LIBSODIUM18_DEB_URL" "--allow-downgrades"
+        install_omr_package "libshadowsocks-libev2" "$LIBSHADOWSOCKS_LIBEV2_VERSION" "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE" "$LIBSHADOWSOCKS_LIBEV2_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
         install_omr_package "omr-libshadowsocks-libev2" "$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
         install_omr_package "omr-libshadowsocks-libev-dev" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
         install_omr_package "omr-shadowsocks-libev" "${SHADOWSOCKS_BINARY_VERSION}" "$OMR_SHADOWSOCKS_DEB_FILE" "$OMR_SHADOWSOCKS_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
