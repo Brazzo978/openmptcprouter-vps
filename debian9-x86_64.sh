@@ -68,6 +68,8 @@ VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 USE_OMR_REPO="no"
+FORCE_REINSTALL="${FORCE_REINSTALL:-no}"
+
 OMR_VERSION="0.1028-3Ktest"
 
 DIR=$( pwd )
@@ -110,31 +112,67 @@ install_omr_admin_from_url() {
 }
 
 install_deb_from_url() {
-  set -e
+  set -euo pipefail
   local pkgname="$1"   # es: omr-glorytun
   local url="$2"
+  local tmpdir pkgfile want_ver cur_ver
 
-  # dipendenze per download/risoluzione
+  # prerequisiti minimi
   apt-get update
   apt-get install -y --no-install-recommends ca-certificates wget apt-transport-https
 
-  # se già installato, esci
-  if dpkg-query -W -f='${Status}\n' "$pkgname" 2>/dev/null | grep -q "install ok installed"; then
-    echo "[INFO] $pkgname già installato, salto."
+  tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
+  pkgfile="$tmpdir/pkg.deb"
+
+  echo "[INFO] Scarico $pkgname da: $url"
+  # retry robusto
+  for i in 1 2 3; do
+    if wget -q --show-progress -O "$pkgfile" "$url"; then
+      break
+    fi
+    echo "[WARN] download fallito (tentativo $i), ritento tra 2s..."
+    sleep 2
+  done
+
+  # estraggo versione desiderata dal .deb
+  want_ver="$(dpkg-deb -f "$pkgfile" Version 2>/dev/null || true)"
+  if [ -z "${want_ver:-}" ]; then
+    echo "[ERR] impossibile leggere la Version dal pacchetto $pkgname" >&2
+    exit 1
+  fi
+
+  # versione attualmente installata (se esiste)
+  cur_ver="$(dpkg-query -W -f='${Version}' "$pkgname" 2>/dev/null || true)"
+
+  if [ "$FORCE_REINSTALL" != "yes" ] && [ -n "$cur_ver" ] && dpkg --compare-versions "$cur_ver" ge "$want_ver"; then
+    echo "[INFO] $pkgname già installato (versione $cur_ver >= $want_ver). Skip."
     return 0
   fi
 
-  tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
+  echo "[INFO] Installo $pkgname $want_ver (current: ${cur_ver:-none}) con risoluzione dipendenze"
+  # pre-installa dipendenze dichiarate (best effort, utile su sistemi molto minimali)
+  deps="$(dpkg-deb -f "$pkgfile" Depends 2>/dev/null | sed 's/([^)]*)//g;s/,//g' | tr -s ' ' '\n' | awk NF || true)"
+  if [ -n "${deps:-}" ]; then
+    # rimuovi versioni opzionali tipo "A | B"
+    clean_deps="$(echo "$deps" | awk -F'|' '{print $1}' | xargs -r)"
+    [ -n "${clean_deps:-}" ] && apt-get install -y --no-install-recommends $clean_deps || true
+  fi
 
-  echo "[INFO] Scarico $pkgname da $url"
-  wget -q -O "$tmpdir/pkg.deb" "$url"
+  # usa apt sul file .deb per tirare eventuali dipendenze mancanti
+  if ! apt-get install -y --no-install-recommends "$pkgfile"; then
+    echo "[WARN] primo tentativo fallito, provo fix dipendenze"
+    apt-get -y -f install || true
+    apt-get install -y --no-install-recommends "$pkgfile"
+  fi
 
-  echo "[INFO] Installo $pkgname"
-  dpkg -i "$tmpdir/pkg.deb" || true
-  # risolvi dipendenze e riprova
-  apt-get -y -f install
-  dpkg -i "$tmpdir/pkg.deb"
+  # verifica stato finale
+  if ! dpkg-query -W -f='${Status}\n' "$pkgname" 2>/dev/null | grep -q 'install ok installed'; then
+    echo "[ERR] $pkgname non risulta installato correttamente" >&2
+    dpkg -l | grep -E "^ii\s+$pkgname" || true
+    exit 1
+  fi
+
+  echo "[OK] $pkgname $want_ver installato correttamente"
 }
 
 
