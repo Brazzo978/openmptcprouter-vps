@@ -26,3 +26,5 @@ This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), a s
 * ```tun0.glorytun-udp```: glorytun default configuration
 * ```update-grub.sh```: Script used to check if MPTCP kernel is the default
 
+
+This fork focuses on bringing back the ability for all the user to install previus version of the vps script , to get full compatibility with older client.
