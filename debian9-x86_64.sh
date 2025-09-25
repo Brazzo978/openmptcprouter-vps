@@ -1095,7 +1095,18 @@ else
   echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
 fi
 # placeholder di config per non far fallire il postinst se controlla il file
-[ -f /etc/glorytun-udp/tun0 ] || echo "keyfile=/etc/glorytun-udp/tun0.key" >/etc/glorytun-udp/tun0
+if [ ! -f /etc/glorytun-udp/tun0 ]; then
+  cat <<'EOF' >/etc/glorytun-udp/tun0
+# Config temporanea generata dallo script di installazione.
+# Verrà sostituita da quella reale a setup completato.
+BIND=0.0.0.0
+BIND_PORT=65001
+HOST=0.0.0.0
+PORT=5000
+DEV=tun0
+OPTIONS="chacha persist"
+EOF
+fi
 
 # 3) Installa il .deb vendorizzato (risolve dipendenze da solo)
 GLORYTUN_UDP_DEB="/tmp/$(basename "$GLORYTUN_UDP_URL")"
