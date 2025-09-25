@@ -184,6 +184,22 @@ install_omr_package() {
         wget -O "$dest" "$url"
     fi
     if [ -n "$dest" ]; then
+        deb_pkg="$(dpkg-deb -f "$dest" Package 2>/dev/null)"
+        deb_version="$(dpkg-deb -f "$dest" Version 2>/dev/null)"
+        deb_arch="$(dpkg-deb -f "$dest" Architecture 2>/dev/null)"
+        compat_pkg=""
+        compat_version=""
+        if [ -n "$deb_pkg" ] && [ "$deb_pkg" != "$pkg" ]; then
+            compat_pkg="$pkg"
+            if [ -n "$version" ]; then
+                compat_version="$version"
+            elif [ -n "$deb_version" ]; then
+                compat_version="$deb_version"
+            fi
+            if [ -z "$compat_version" ] && [ -n "$deb_version" ]; then
+                compat_version="$deb_version"
+            fi
+        fi
         set -- "$@"
         dpkg_opts=""
         while [ $# -gt 0 ]; do
@@ -204,7 +220,7 @@ install_omr_package() {
         done
         if ! dpkg $dpkg_opts -i "$dest"; then
             rc=$?
-            if apt-get -y -f install; then
+            if apt-get -y --no-remove -f install; then
                 if dpkg $dpkg_opts -i "$dest"; then
                     rc=0
                 else
@@ -213,6 +229,35 @@ install_omr_package() {
             fi
         else
             rc=0
+        fi
+        if [ $rc -eq 0 ] && [ -n "$compat_pkg" ] && [ -n "$compat_version" ] && [ -n "$deb_pkg" ] && [ -n "$deb_version" ] && [ -n "$deb_arch" ]; then
+            if ! dpkg -s "$compat_pkg" >/dev/null 2>&1; then
+                compat_dir="$(mktemp -d)"
+                if [ -n "$compat_dir" ] && [ -d "$compat_dir" ]; then
+                    mkdir -p "$compat_dir/DEBIAN"
+                    {
+                        echo "Package: $compat_pkg"
+                        echo "Version: $compat_version"
+                        echo "Architecture: $deb_arch"
+                        echo "Depends: $deb_pkg (= $deb_version)"
+                        echo "Provides: $compat_pkg"
+                        echo "Section: misc"
+                        echo "Priority: optional"
+                        echo "Maintainer: OpenMPTCProuter <contact@openmptcprouter.com>"
+                        echo "Description: Compatibility metapackage for $deb_pkg"
+                        echo " This metapackage satisfies dependencies on $compat_pkg by"
+                        echo " depending on $deb_pkg."
+                    } > "$compat_dir/DEBIAN/control"
+                    if dpkg-deb --build "$compat_dir" "$compat_dir/${compat_pkg}.deb" >/dev/null 2>&1; then
+                        dpkg -i "$compat_dir/${compat_pkg}.deb" >/dev/null 2>&1 || rc=$?
+                    else
+                        rc=1
+                    fi
+                    rm -rf "$compat_dir"
+                else
+                    rc=1
+                fi
+            fi
         fi
         rm -f "$dest"
         return $rc
