@@ -96,17 +96,9 @@ if test -f /etc/os-release ; then
 else
 	. /usr/lib/os-release
 fi
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" != "9" ] && [ "$VERSION_ID" != "10" ] && [ "$VERSION_ID" != "11" ]; then
-	echo "This script only work with Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
-	exit 1
-elif [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "18.04" ] && [ "$VERSION_ID" != "19.04" ] && [ "$VERSION_ID" != "20.04" ] && [ "$VERSION_ID" != "22.04" ]; then
-	echo "This script only work with Ubuntu 18.04, 19.04, 20.04 or 22.04"
-	echo "Use debian when possible"
-	exit 1
-elif [ "$ID" != "debian" ] && [ "$ID" != "ubuntu" ]; then
-	echo "This script only work with Ubuntu 18.04, Ubuntu 19.04, Ubutun 20.04, Ubuntu 22.04, Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
-	echo "Use Debian when possible"
-	exit 1
+if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "11" ]; then
+        echo "This script only works with Debian Bullseye (11.x)"
+        exit 1
 fi
 
 echo "Check architecture..."
@@ -182,38 +174,12 @@ echo "Remove lock and update packages list..."
 rm -f /var/lib/dpkg/lock
 rm -f /var/lib/dpkg/lock-frontend
 rm -f /var/cache/apt/archives/lock
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
-	apt-get update
-else
-	apt-get update --allow-releaseinfo-change
-fi
+apt-get update
 rm -f /var/lib/dpkg/lock
 rm -f /var/lib/dpkg/lock-frontend
 rm -f /var/cache/apt/archives/lock
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server
-
-#if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_DEBIAN" = "yes" ] && [ "$update" = "0" ]; then
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Debian 9 Stretch to Debian 10 Buster"
-	apt-get -y -f --force-yes upgrade
-	apt-get -y -f --force-yes dist-upgrade
-	sed -i 's:stretch:buster:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="10"
-fi
-if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Ubuntu 18.04 to Ubuntu 20.04"
-	apt-get -y -f --force-yes upgrade
-	apt-get -y -f --force-yes dist-upgrade
-	sed -i 's:bionic:focal:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="20.04"
-fi
 
 # Add OpenMPTCProuter repo
 echo "Add OpenMPTCProuter repo..."
@@ -248,7 +214,7 @@ if [ "$CHINA" = "yes" ]; then
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
 else
-	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+        echo "deb [arch=amd64] https://${REPO} bullseye main" > /etc/apt/sources.list.d/openmptcprouter.list
 	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
 		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
 		Package: *
@@ -270,21 +236,8 @@ else
 fi
 
 #apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
-if [ "$ID" = "debian" ]; then
-	if [ "$VERSION_ID" = "9" ]; then
-		#echo 'deb http://dl.bintray.com/cpaasch/deb jessie main' >> /etc/apt/sources.list
-		echo 'deb http://deb.debian.org/debian stretch-backports main' > /etc/apt/sources.list.d/stretch-backports.list
-	fi
-	# Add buster-backports repo
-	echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/buster-backports.list
-elif [ "$ID" = "ubuntu" ]; then
-	echo 'deb http://archive.ubuntu.com/ubuntu bionic-backports main' > /etc/apt/sources.list.d/bionic-backports.list
-	echo 'deb http://archive.ubuntu.com/ubuntu bionic universe' > /etc/apt/sources.list.d/bionic-universe.list
-	[ "$VERSION_ID" = "22.04" ] && {
-		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32
-		echo 'deb http://old-releases.ubuntu.com/ubuntu impish main universe' > /etc/apt/sources.list.d/impish-universe.list
-	}
-fi
+# Add bullseye-backports repo
+echo 'deb http://deb.debian.org/debian bullseye-backports main' > /etc/apt/sources.list.d/bullseye-backports.list
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
@@ -387,7 +340,6 @@ fi
 apt-get -y remove shadowsocks-libev
 
 if [ "$SOURCES" = "yes" ]; then
-	#apt -t stretch-backports -y install shadowsocks-libev
 	## Compile Shadowsocks
 	#rm -rf /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	#wget -O /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz http://github.com/shadowsocks/shadowsocks-libev/releases/download/v${SHADOWSOCKS_VERSION}/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz
@@ -418,8 +370,6 @@ if [ "$SOURCES" = "yes" ]; then
 	#cd libbpf
 	#if [ "$ID" = "debian" ]; then
 	#	rm -f /var/lib/dpkg/lock
-	#	apt -y -t stretch-backports install linux-libc-dev
-	#elif [ "$ID" = "ubuntu" ]; then
 	#	rm -f /var/lib/dpkg/lock
 	#	apt-get -y install linux-libc-dev
 	#fi
@@ -437,19 +387,9 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -f /var/lib/dpkg/lock-frontend
 	systemctl enable haveged
 	
-	if [ "$ID" = "debian" ]; then
-		rm -f /var/lib/dpkg/lock
-		rm -f /var/lib/dpkg/lock-frontend
-		if [ "$VERSION_ID" = "9" ]; then
-			apt -y -t stretch-backports install libsodium-dev
-		else
-			apt -y install libsodium-dev
-		fi
-	elif [ "$ID" = "ubuntu" ]; then
-		rm -f /var/lib/dpkg/lock
-		rm -f /var/lib/dpkg/lock-frontend
-		apt-get -y install libsodium-dev
-	fi
+        rm -f /var/lib/dpkg/lock
+        rm -f /var/lib/dpkg/lock-frontend
+        apt-get -y install libsodium-dev
 	#cd /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
@@ -521,46 +461,11 @@ fi
 
 if [ "$OMR_ADMIN" = "yes" ]; then
 	echo 'Install OpenMPTCProuter VPS Admin'
-	if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
-		#echo 'deb http://ftp.de.debian.org/debian buster main' > /etc/apt/sources.list.d/buster.list
-		#echo 'APT::Default-Release "stretch";' | tee -a /etc/apt/apt.conf.d/00local
-		#apt-get update
-		#apt-get -y -t buster install python3.7-dev
-		#apt-get -y -t buster install python3-pip python3-setuptools python3-wheel
-		if [ "$(whereis python3 | grep python3.7)" = "" ]; then
-			apt-get -y install libffi-dev build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev wget
-			wget -O /tmp/Python-3.7.2.tgz https://www.python.org/ftp/python/3.7.2/Python-3.7.2.tgz
-			cd /tmp
-			tar xzf Python-3.7.2.tgz
-			cd Python-3.7.2
-			./configure --enable-optimizations
-			make
-			make altinstall
-			cd /tmp
-			rm -rf /tmp/Python-3.7.2
-			update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.7 1
-			update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip3.7 1
-			sed -i 's:/usr/bin/python3 :/usr/bin/python3\.7 :g' /usr/bin/lsb_release
-		fi
-		pip3 -q install setuptools wheel
-		pip3 -q install pyopenssl
-	else
-		apt-get -y install python3-openssl python3-pip python3-setuptools python3-wheel python3-dev
-	fi
+        apt-get -y install python3-openssl python3-pip python3-setuptools python3-wheel python3-dev
 	#apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
 	#apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
-	if [ "$ID" = "ubuntu" ]; then
-		apt-get -y install python3-passlib python3-netaddr
-		apt-get -y remove python3-jwt
-		pip3 -q install pyjwt
-	else
-		if [ "$ID" = "debian" ] && ([ "$VERSION_ID" = "10" ] || [ "$VERSION_ID" = "11" ]); then
-			apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
-			pip3 -q install uvloop
-		else
-			apt-get -y install python3-passlib python3-jwt python3-netaddr libuv1 python3-uvloop
-		fi
-	fi
+        apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
+        pip3 -q install uvloop
 	apt-get -y --allow-downgrades install python3-uvicorn jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
 	echo '-- pip3 install needed python modules'
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
@@ -716,13 +621,7 @@ if [ "$OBFS" = "yes" ]; then
 		cd /tmp
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
-		if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
-			#apt-get install -y --no-install-recommends -t buster libssl-dev
-			apt-get install -y --no-install-recommends libssl-dev
-			apt-get install -y --no-install-recommends build-essential autoconf libtool libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
-		else
-			apt-get install -y --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
-		fi
+                apt-get install -y --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
 		git clone https://github.com/shadowsocks/simple-obfs.git /tmp/simple-obfs
 		cd /tmp/simple-obfs
 		git checkout ${OBFS_VERSION}
@@ -993,32 +892,6 @@ if [ "$OPENVPN" = "yes" ]; then
 	#	cd /etc/openvpn/server
 	#	openvpn --genkey --secret static.key
 	#fi
-	if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ ! -d /etc/openvpn/ca ]; then
-		wget -O /tmp/EasyRSA-unix-v${EASYRSA_VERSION}.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.6/EasyRSA-unix-v${EASYRSA_VERSION}.tgz
-		cd /tmp
-		tar xzvf EasyRSA-unix-v${EASYRSA_VERSION}.tgz
-		cd /tmp/EasyRSA-v${EASYRSA_VERSION}
-		mkdir -p /etc/openvpn/ca
-		cp easyrsa /etc/openvpn/ca/
-		cp openssl-easyrsa.cnf /etc/openvpn/ca/
-		cp vars.example /etc/openvpn/ca/vars
-		cp -r x509-types /etc/openvpn/ca/
-
-		#mkdir -p /etc/openvpn/ca/pki/private /etc/openvpn/ca/pki/issued
-		#./easyrsa init-pki
-		#./easyrsa --batch build-ca nopass
-		#EASYRSA_CERT_EXPIRE=3650 ./easyrsa build-server-full server nopass
-		#EASYRSA_CERT_EXPIRE=3650 EASYRSA_REQ_CN=openmptcprouter ./easyrsa build-client-full "openmptcprouter" nopass
-		#EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
-		#mv pki/ca.crt /etc/openvpn/ca/pki/ca.crt
-		#mv pki/private/ca.key /etc/openvpn/ca/pki/private/ca.key
-		#mv pki/issued/server.crt /etc/openvpn/ca/pki/issued/server.crt
-		#mv pki/private/server.key /etc/openvpn/ca/pki/private/server.key
-		#mv pki/crl.pem /etc/openvpn/ca/pki/crl.pem
-		#mv pki/issued/openmptcprouter.crt /etc/openvpn/ca/pki/issued/openmptcprouter.crt
-		#mv pki/private/openmptcprouter.key /etc/openvpn/ca/pki/private/openmptcprouter.key
-	fi
-
 	if [ -f "/etc/openvpn/server/server.crt" ]; then
 		if [ ! -d /etc/openvpn/ca ]; then
 			make-cadir /etc/openvpn/ca
@@ -1202,15 +1075,7 @@ if systemctl -q is-active glorytun-tcp@tun0.service; then
 	systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
 fi
 if [ "$SOURCES" = "yes" ]; then
-	if [ "$ID" = "debian" ]; then
-		if [ "$VERSION_ID" = "9" ]; then
-			apt -t stretch-backports -y install libsodium-dev
-		else
-			apt -y install libsodium-dev
-		fi
-	elif [ "$ID" = "ubuntu" ]; then
-		apt-get -y install libsodium-dev
-	fi
+        apt-get -y install libsodium-dev
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
 	rm -f /usr/bin/glorytun-tcp
@@ -1366,17 +1231,6 @@ else
 	fi
 fi
 [ -z "$(grep nf_conntrack_sip /etc/modprobe.d/blacklist.conf)" ] && echo 'blacklist nf_conntrack_sip' >> /etc/modprobe.d/blacklist.conf
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "10" ]; then
-	apt-get -y install iptables
-	update-alternatives --set iptables /usr/sbin/iptables-legacy
-	update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
-fi
-if ([ "$ID" = "debian" ] && [ "$VERSION_ID" = "10" ]) || ([ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "19.04" ]) || ([ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "20.04" ]); then
-	sed -i 's:DROP_DEFAULT=Drop:DROP_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall/shorewall.conf
-	sed -i 's:REJECT_DEFAULT=Reject:REJECT_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall/shorewall.conf
-	sed -i 's:DROP_DEFAULT=Drop:DROP_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall6/shorewall6.conf
-	sed -i 's:REJECT_DEFAULT=Reject:REJECT_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall6/shorewall6.conf
-fi
 if [ "$(ip r | awk '/default/&&/src/ {print $7}')" != "" ] && [ "$(ip r | awk '/default/&&/src/ {print $7}')" != "dhcp" ]; then
 	sed -i "s/MASQUERADE/SNAT($(ip r | awk '/default/&&/src/ {print $7}'))/" /etc/shorewall/snat
 fi
