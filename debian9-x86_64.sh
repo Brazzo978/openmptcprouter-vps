@@ -1169,7 +1169,7 @@ rm -f /usr/local/bin/glorytun-tcp
 # Installa omr-glorytun-tcp dal .deb vendorizzato (GitHub)
 # richiede che in cima allo script tu abbia:
 #   GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
-# e la funzione install_deb_from_url_if_needed già definita
+# e la funzione install_deb_from_url già definita
 install_deb_from_url "omr-glorytun-tcp" "$GLORYTUN_TCP_URL"
 
 # Assicura directory e chiave
