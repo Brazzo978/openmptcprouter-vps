@@ -67,7 +67,7 @@ VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com
 VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
-
+USE_OMR_REPO="no"
 OMR_VERSION="0.1028-3Ktest"
 
 DIR=$( pwd )
@@ -169,95 +169,76 @@ if [ "$UPDATE" = "yes" ]; then
 	fi
 	echo "Update mode"
 fi
-# Force update key
-[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-	echo "Update OpenMPTCProuter repo key"
-	wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
-}
-
-CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}')"
-if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
-	exit 1
-fi
-
-[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-	echo "Update ${REPO} key"
-	if [ "$CHINA" = "yes" ]; then
-		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-		wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-	else
-		wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-	fi
-}
 
 echo "Remove lock and update packages list..."
-rm -f /var/lib/dpkg/lock
-rm -f /var/lib/dpkg/lock-frontend
-rm -f /var/cache/apt/archives/lock
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
-	apt-get update
-else
-	apt-get update --allow-releaseinfo-change
+rm -f /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
+
+# 🔒 Se NON usiamo la repo OMR, rimuovi eventuali tracce/pin pre-esistenti
+if [ "$USE_OMR_REPO" = "no" ]; then
+    rm -f /etc/apt/sources.list.d/openmptcprouter.list \
+          /etc/apt/sources.list.d/openmptcprouter-test.list \
+          /etc/apt/preferences.d/openmptcprouter.pref
 fi
-rm -f /var/lib/dpkg/lock
-rm -f /var/lib/dpkg/lock-frontend
-rm -f /var/cache/apt/archives/lock
+
+# Debian 11: update pacchetti
+apt-get update --allow-releaseinfo-change
+
+rm -f /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
+
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server
 
-# Add OpenMPTCProuter repo
-echo "Add OpenMPTCProuter repo..."
-if [ "$CHINA" = "yes" ]; then
-	echo "Install git..."
-	apt-get -y install git
-	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
-		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
-	fi
-	cd /var/lib/openmptcprouter-vps-debian
-	git pull
-#	if [ "$VPSPATH" = "server-test" ]; then
-#		git checkout develop
-#	else
-#		git checkout main
-#	fi
-	echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
-	cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
-	if [ ! -d /usr/share/omr-server-git ]; then
-		#git clone https://gitee.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
-	fi
-	cd /usr/share/omr-server-git
-	git pull
-	if [ "$VPSPATH" = "server-test" ]; then
-		git checkout develop
-	else
-		git checkout master
-	fi
-	LOCALFILES="yes"
-	TLS="no"
-	DIR="/usr/share/omr-server-git"
-else
-	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
-	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
-		Package: *
-		Pin: origin ${REPO}
-		Pin-Priority: 1001
-	EOF
-	if [ -n "$(echo $OMR_VERSION | grep test)" ]; then
-		echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
-		cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-			Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
-			Package: *
-			Pin: origin ${REPO}
-			Pin-Priority: 1002
-		EOF
-	else
-		rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
-	fi
-	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+# Add OpenMPTCProuter repo (disabilitato di default)
+if [ "$USE_OMR_REPO" = "yes" ]; then
+    echo "Add OpenMPTCProuter repo..."
+    if [ "$CHINA" = "yes" ]; then
+        echo "Install git..."
+        apt-get -y install git
+        if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
+            git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
+        fi
+        cd /var/lib/openmptcprouter-vps-debian
+        git pull
+        echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
+        cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
+        if [ ! -d /usr/share/omr-server-git ]; then
+            git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
+        fi
+        cd /usr/share/omr-server-git
+        git pull
+        if [ "$VPSPATH" = "server-test" ]; then
+            git checkout develop
+        else
+            git checkout master
+        fi
+        LOCALFILES="yes"
+        TLS="no"
+        DIR="/usr/share/omr-server-git"
+    else
+        echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+        cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+            Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+            Package: *
+            Pin: origin ${REPO}
+            Pin-Priority: 1001
+        EOF
+        if [ -n "$(echo $OMR_VERSION | grep test)" ]; then
+            echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
+            cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+                Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+                Package: *
+                Pin: origin ${REPO}
+                Pin-Priority: 1002
+            EOF
+        else
+            rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
+        fi
+        wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+    fi
 fi
+
+[ "$USE_OMR_REPO" = "yes" ] && apt-get update
+
 
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
