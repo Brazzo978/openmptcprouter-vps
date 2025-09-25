@@ -81,6 +81,8 @@ export DEBIAN_FRONTEND=noninteractive
 # --- begin: install omr-vps-admin from your GitHub asset ---
 ADMIN_DEB_URL="${ADMIN_DEB_URL:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/omr-vps-admin/omr-vps-admin_0.3+20220827_all.deb}"
 V2RAY_DEB_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/v2ray-4.43.0-amd64.deb"
+GLORYTUN_UDP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun_0.3.4-5_amd64.deb"
+GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
 
 install_v2ray_from_url() {
     local url="${V2RAY_DEB_URL}"
@@ -105,6 +107,35 @@ install_omr_admin_from_url() {
     rm -f "$deb"
     echo "omr-vps-admin installed from custom URL."
 }
+
+install_deb_from_url() {
+  set -e
+  local pkgname="$1"   # es: omr-glorytun
+  local url="$2"
+
+  # dipendenze per download/risoluzione
+  apt-get update
+  apt-get install -y --no-install-recommends ca-certificates wget apt-transport-https
+
+  # se già installato, esci
+  if dpkg-query -W -f='${Status}\n' "$pkgname" 2>/dev/null | grep -q "install ok installed"; then
+    echo "[INFO] $pkgname già installato, salto."
+    return 0
+  fi
+
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  echo "[INFO] Scarico $pkgname da $url"
+  wget -q -O "$tmpdir/pkg.deb" "$url"
+
+  echo "[INFO] Installo $pkgname"
+  dpkg -i "$tmpdir/pkg.deb" || true
+  # risolvi dipendenze e riprova
+  apt-get -y -f install
+  dpkg -i "$tmpdir/pkg.deb"
+}
+
 
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
@@ -1054,64 +1085,28 @@ if [ "$OPENVPN" = "yes" ]; then
 fi
 
 echo 'Glorytun UDP'
-# Install Glorytun UDP
+# stop eventuali servizi attivi
 if systemctl -q is-active glorytun-udp@tun0.service; then
-	systemctl -q stop 'glorytun-udp@*' > /dev/null 2>&1
+    systemctl -q stop 'glorytun-udp@*' > /dev/null 2>&1
 fi
-if [ "$SOURCES" = "yes" ]; then
-	rm -f /var/lib/dpkg/lock
-	rm -f /var/lib/dpkg/lock-frontend
-	rm -f /usr/bin/glorytun
-	apt-get install -y --no-install-recommends build-essential git ca-certificates meson pkg-config
-	rm -rf /tmp/glorytun-udp
-	cd /tmp
-	git clone https://github.com/angt/glorytun.git /tmp/glorytun-udp
-	cd /tmp/glorytun-udp
-	git checkout ${GLORYTUN_UDP_VERSION}
-	git submodule update --init --recursive
-	meson build
-	ninja -C build install
-	sed -i 's:EmitDNS=yes:EmitDNS=no:g' /lib/systemd/network/glorytun.network
-	rm /lib/systemd/system/glorytun*
-	rm /lib/systemd/network/glorytun*
-	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /usr/local/bin/glorytun-udp-run ${VPSURL}${VPSPATH}/glorytun-udp-run
-	else
-		cp ${DIR}/glorytun-udp-run /usr/local/bin/glorytun-udp-run
-	fi
-	chmod 755 /usr/local/bin/glorytun-udp-run
-	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /lib/systemd/system/glorytun-udp@.service ${VPSURL}${VPSPATH}/glorytun-udp%40.service.in
-	else
-		cp ${DIR}/glorytun-udp@.service.in /lib/systemd/system/glorytun-udp@.service
-	fi
-	#wget -O /lib/systemd/network/glorytun-udp.network ${VPSURL}${VPSPATH}/glorytun-udp.network
-	rm -f /lib/systemd/network/glorytun-udp.network
-	mkdir -p /etc/glorytun-udp
-	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/glorytun-udp/post.sh ${VPSURL}${VPSPATH}/glorytun-udp-post.sh
-		wget -O /etc/glorytun-udp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun-udp
-	else
-		cp ${DIR}/glorytun-udp-post.sh /etc/glorytun-udp/post.sh
-		cp ${DIR}/tun0.glorytun-udp /etc/glorytun-udp/tun0
-	fi
-	chmod 755 /etc/glorytun-udp/post.sh
-	if [ "$update" = "0" ] || [ ! -f /etc/glorytun-udp/tun0.key ]; then
-		echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
-	elif [ ! -f /etc/glorytun-udp/tun0.key ] && [ -f /etc/glorytun-tcp/tun0.key ]; then
-		cp /etc/glorytun-tcp/tun0.key /etc/glorytun-udp/tun0.key
-	fi
-	systemctl enable glorytun-udp@tun0.service
-	systemctl enable systemd-networkd.service
-	cd /tmp
-	rm -rf /tmp/glorytun-udp
-else
-	rm -f /usr/local/bin/glorytun
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun=${GLORYTUN_UDP_BINARY_VERSION}
-	GLORYTUN_PASS="$(cat /etc/glorytun-udp/tun0.key | tr -d '\n')"
-fi
-[ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
 
+rm -f /usr/local/bin/glorytun
+
+# Installa omr-glorytun dal .deb della tua fork
+install_deb_from_url_if_needed "omr-glorytun" "$GLORYTUN_UDP_URL"
+
+# Assicura chiave e variabile GLORYTUN_PASS
+mkdir -p /etc/glorytun-udp
+if [ -f /etc/glorytun-udp/tun0.key ]; then
+    GLORYTUN_PASS="$(tr -d '\n' </etc/glorytun-udp/tun0.key)"
+else
+    echo "$GLORYTUN_PASS" > /etc/glorytun-udp/tun0.key
+fi
+
+systemctl enable glorytun-udp@tun0.service
+systemctl enable systemd-networkd.service
+
+[ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
 
 # Add chrony for time sync
 apt-get install -y chrony
@@ -1162,59 +1157,37 @@ if [ "$DSVPN" = "yes" ]; then
 fi
 
 # Install Glorytun TCP
+echo 'Glorytun TCP'
+# stop eventuali servizi attivi
 if systemctl -q is-active glorytun-tcp@tun0.service; then
-	systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
+    systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
 fi
-if [ "$SOURCES" = "yes" ]; then
-	if [ "$ID" = "debian" ]; then
-		if [ "$VERSION_ID" = "9" ]; then
-			apt -t stretch-backports -y install libsodium-dev
-		else
-			apt -y install libsodium-dev
-		fi
-	elif [ "$ID" = "ubuntu" ]; then
-		apt-get -y install libsodium-dev
-	fi
-	rm -f /var/lib/dpkg/lock
-	rm -f /var/lib/dpkg/lock-frontend
-	rm -f /usr/bin/glorytun-tcp
-	apt-get -y install build-essential pkg-config autoconf automake
-	rm -rf /tmp/glorytun-0.0.35
-	cd /tmp
-	if [ "$UPSTREAM" = "yes" ]; then
-		wget -O /tmp/glorytun-0.0.35.tar.gz https://github.com/Ysurac/glorytun/archive/refs/heads/tcp.tar.gz
-	else
-		wget -O /tmp/glorytun-0.0.35.tar.gz http://github.com/angt/glorytun/releases/download/v0.0.35/glorytun-0.0.35.tar.gz
-	fi
-	tar xzf glorytun-0.0.35.tar.gz
-	if [ "$UPSTREAM" = "yes" ]; then
-		mv /tmp/glorytun-tcp /tmp/glorytun-0.0.35
-	fi
-	cd glorytun-0.0.35
-	./autogen.sh
-	./configure
-	make
-	cp glorytun /usr/local/bin/glorytun-tcp
-	wget -O /usr/local/bin/glorytun-tcp-run ${VPSURL}${VPSPATH}/glorytun-tcp-run
-	chmod 755 /usr/local/bin/glorytun-tcp-run
-	wget -O /lib/systemd/system/glorytun-tcp@.service ${VPSURL}${VPSPATH}/glorytun-tcp%40.service.in
-	#wget -O /lib/systemd/network/glorytun-tcp.network ${VPSURL}${VPSPATH}/glorytun.network
-	rm -f /lib/systemd/network/glorytun-tcp.network
-	mkdir -p /etc/glorytun-tcp
-	wget -O /etc/glorytun-tcp/post.sh ${VPSURL}${VPSPATH}/glorytun-tcp-post.sh
-	chmod 755 /etc/glorytun-tcp/post.sh
-	wget -O /etc/glorytun-tcp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun
-	if [ "$update" = "0" ]; then
-		echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
-	fi
-	systemctl enable glorytun-tcp@tun0.service
-	#systemctl enable systemd-networkd.service
-	cd /tmp
-	rm -rf /tmp/glorytun-0.0.35
+
+# rimuovi eventuale binario custom vecchio
+rm -f /usr/local/bin/glorytun-tcp
+
+# Installa omr-glorytun-tcp dal .deb vendorizzato (GitHub)
+# richiede che in cima allo script tu abbia:
+#   GLORYTUN_TCP_URL="https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack/omr-glorytun-tcp_0.0.35-3_amd64.deb"
+# e la funzione install_deb_from_url_if_needed già definita
+install_deb_from_url_if_needed "omr-glorytun-tcp" "$GLORYTUN_TCP_URL"
+
+# Assicura directory e chiave
+mkdir -p /etc/glorytun-tcp
+if [ -f /etc/glorytun-tcp/tun0.key ]; then
+    : # già presente, non tocco
+elif [ -f /etc/glorytun-udp/tun0.key ]; then
+    # se esiste la chiave UDP, riusa per TCP
+    cp /etc/glorytun-udp/tun0.key /etc/glorytun-tcp/tun0.key
 else
-	rm -f /usr/local/bin/glorytun-tcp
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun-tcp=${GLORYTUN_TCP_BINARY_VERSION}
+    # altrimenti crea la chiave con GLORYTUN_PASS
+    echo "$GLORYTUN_PASS" > /etc/glorytun-tcp/tun0.key
 fi
+
+# abilita servizio
+systemctl enable glorytun-tcp@tun0.service
+
+# IPv6: se l'host ha IPv6, usa :: nei conf generici
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
 
 
