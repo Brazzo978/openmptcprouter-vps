@@ -37,15 +37,6 @@ NOINTERNET=${NOINTERNET:-no}
 REINSTALL=${REINSTALL:-yes}
 SPEEDTEST=${SPEEDTEST:-yes}
 LOCALFILES=${LOCALFILES:-no}
-OMR_STATIC_DEB_BASE=${OMR_STATIC_DEB_BASE:-https://github.com/Brazzo978/openmptcprouter-vps/raw/refs/heads/omr-vps-0.1028-def/Pack}
-if [ -z "${USE_OMR_REPO+x}" ]; then
-        if [ -n "$OMR_STATIC_DEB_BASE" ]; then
-                USE_OMR_REPO=no
-        else
-                USE_OMR_REPO=yes
-        fi
-fi
-OMR_REQUIRE_STATIC=${OMR_REQUIRE_STATIC:-no}
 INTERFACE=${INTERFACE:-$(ip -o -4 route show to default | grep -m 1 -Po '(?<=dev )(\S+)' | tr -d "\n")}
 KERNEL_VERSION="5.4.207"
 KERNEL_PACKAGE_VERSION="1.22"
@@ -77,23 +68,6 @@ if [ "$UPSTREAM" = "yes" ]; then
 fi
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
-LIBJSON_C3_VERSION="0.12.1+ds-2"
-LIBSODIUM18_VERSION="1.0.13-1"
-LIBUV1_VERSION="1.34.2-1"
-PYTHON3_FLASK_VERSION="1.0.2"
-PYTHON3_FLASK_JWT_SIMPLE_VERSION="0.0.3"
-PYTHON3_ITSDANGEROUS_VERSION="1.1.0"
-PYTHON3_JINJA2_VERSION="2.10"
-PYTHON3_MARKUPSAFE_VERSION="1.1.1"
-PYTHON3_PYJWT_VERSION="1.7.1"
-PYTHON3_UVICORN_VERSION="0.11.5-1"
-PYTHON3_UVLOOP_VERSION="0.14.0+ds1-1"
-PYTHON3_WATCHGOD_VERSION="0.6-1"
-PYTHON3_WERKZEUG_VERSION="0.15.1"
-OMR_LIBIPERF0_BINARY_VERSION="3.7-2"
-OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION="3.3.5-3"
-OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION="3.3.5-3"
-OPENVPN_BINARY_VERSION="2.6.14-1"
 DEFAULT_USER="openmptcprouter"
 VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
 VPSPATH="server"
@@ -106,237 +80,6 @@ OMR_VERSION="0.1028"
 
 DIR=$( pwd )
 #"
-find_latest_pack_file() {
-    prefix="$1"
-    suffix="$2"
-    best=""
-    best_version=""
-    if [ -d "${DIR}/Pack" ]; then
-        for path in "${DIR}/Pack/"*; do
-            [ -f "$path" ] || continue
-            file=${path##*/}
-            case "$file" in
-                ${prefix}*${suffix})
-                    version=${file#${prefix}}
-                    version=${version%${suffix}}
-                    if [ -z "$best" ] || dpkg --compare-versions "$version" gt "$best_version"; then
-                        best="$file"
-                        best_version="$version"
-                    fi
-                ;;
-            esac
-        done
-    fi
-    printf "%s" "$best"
-}
-
-select_static_deb_file() {
-    default="$1"
-    prefix="$2"
-    suffix="$3"
-    if [ -n "$default" ] && [ -f "${DIR}/Pack/${default}" ]; then
-        printf "%s" "$default"
-        return
-    fi
-    alt=$(find_latest_pack_file "$prefix" "$suffix")
-    if [ -n "$alt" ]; then
-        printf "%s" "$alt"
-        return
-    fi
-    printf "%s" "$default"
-}
-
-get_static_deb_url() {
-    base="$1"
-    file="$2"
-    if [ -n "$base" ] && [ -n "$file" ]; then
-        printf "%s/%s" "${base%/}" "$file"
-    fi
-}
-
-LIBSHADOWSOCKS_LIBEV2_VERSION=${LIBSHADOWSOCKS_LIBEV2_VERSION:-$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION}
-LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE="libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb"
-LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "$LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE" "libshadowsocks-libev2_" "_amd64.deb")}
-if [ "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE" = "$LIBSHADOWSOCKS_LIBEV2_DEFAULT_FILE" ] && [ ! -f "${DIR}/Pack/${LIBSHADOWSOCKS_LIBEV2_DEB_FILE}" ]; then
-    alt_libshadowsocks_libev2_file=$(select_static_deb_file "omr-libshadowsocks-libev2_${LIBSHADOWSOCKS_LIBEV2_VERSION}_amd64.deb" "omr-libshadowsocks-libev2_" "_amd64.deb")
-    if [ -n "$alt_libshadowsocks_libev2_file" ]; then
-        LIBSHADOWSOCKS_LIBEV2_DEB_FILE="$alt_libshadowsocks_libev2_file"
-    fi
-fi
-LIBSHADOWSOCKS_LIBEV2_DEB_URL=${LIBSHADOWSOCKS_LIBEV2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE")}
-
-install_omr_package() {
-    pkg="$1"
-    version="$2"
-    filename="$3"
-    url="$4"
-    shift 4
-    dest=""
-    if [ "$LOCALFILES" = "yes" ] && [ -n "$filename" ] && [ -f "${DIR}/Pack/${filename}" ]; then
-        dest="/tmp/${filename}"
-        cp "${DIR}/Pack/${filename}" "$dest"
-    elif [ -n "$url" ]; then
-        if [ -n "$filename" ]; then
-            dest="/tmp/${filename}"
-        else
-            dest="/tmp/$(basename "$url")"
-        fi
-        wget -O "$dest" "$url"
-    fi
-    if [ -n "$dest" ]; then
-        deb_pkg="$(dpkg-deb -f "$dest" Package 2>/dev/null)"
-        deb_version="$(dpkg-deb -f "$dest" Version 2>/dev/null)"
-        deb_arch="$(dpkg-deb -f "$dest" Architecture 2>/dev/null)"
-        compat_pkg=""
-        compat_version=""
-        if [ -n "$deb_pkg" ] && [ "$deb_pkg" != "$pkg" ]; then
-            compat_pkg="$pkg"
-            if [ -n "$version" ]; then
-                compat_version="$version"
-            elif [ -n "$deb_version" ]; then
-                compat_version="$deb_version"
-            fi
-            if [ -z "$compat_version" ] && [ -n "$deb_version" ]; then
-                compat_version="$deb_version"
-            fi
-        fi
-        set -- "$@"
-        dpkg_opts=""
-        while [ $# -gt 0 ]; do
-            case "$1" in
-                -o)
-                    shift
-                    opt="$1"
-                    case "$opt" in
-                        Dpkg::Options::=--*)
-                            dpkg_opts="$dpkg_opts --${opt#Dpkg::Options::=--}"
-                            ;;
-                    esac
-                    ;;
-                *)
-                    ;;
-            esac
-            shift
-        done
-        if ! dpkg $dpkg_opts -i "$dest"; then
-            rc=$?
-            if apt-get -y --no-remove -f install; then
-                if dpkg $dpkg_opts -i "$dest"; then
-                    rc=0
-                else
-                    rc=$?
-                fi
-            fi
-        else
-            rc=0
-        fi
-        if [ $rc -eq 0 ] && [ -n "$compat_pkg" ] && [ -n "$compat_version" ] && [ -n "$deb_pkg" ] && [ -n "$deb_version" ] && [ -n "$deb_arch" ]; then
-            if ! dpkg -s "$compat_pkg" >/dev/null 2>&1; then
-                compat_dir="$(mktemp -d)"
-                if [ -n "$compat_dir" ] && [ -d "$compat_dir" ]; then
-                    mkdir -p "$compat_dir/DEBIAN"
-                    {
-                        echo "Package: $compat_pkg"
-                        echo "Version: $compat_version"
-                        echo "Architecture: $deb_arch"
-                        echo "Depends: $deb_pkg (= $deb_version)"
-                        echo "Provides: $compat_pkg"
-                        echo "Section: misc"
-                        echo "Priority: optional"
-                        echo "Maintainer: OpenMPTCProuter <contact@openmptcprouter.com>"
-                        echo "Description: Compatibility metapackage for $deb_pkg"
-                        echo " This metapackage satisfies dependencies on $compat_pkg by"
-                        echo " depending on $deb_pkg."
-                    } > "$compat_dir/DEBIAN/control"
-                    if dpkg-deb --build "$compat_dir" "$compat_dir/${compat_pkg}.deb" >/dev/null 2>&1; then
-                        dpkg -i "$compat_dir/${compat_pkg}.deb" >/dev/null 2>&1 || rc=$?
-                    else
-                        rc=1
-                    fi
-                    rm -rf "$compat_dir"
-                else
-                    rc=1
-                fi
-            fi
-        fi
-        rm -f "$dest"
-        return $rc
-    fi
-    if [ "$OMR_REQUIRE_STATIC" = "yes" ] && [ "$USE_OMR_REPO" != "yes" ]; then
-        echo "Static package $pkg requested but no static file or URL provided" >&2
-        return 1
-    fi
-    if [ -n "$version" ]; then
-        apt-get -y "$@" install "${pkg}=${version}"
-    else
-        apt-get -y "$@" install "${pkg}"
-    fi
-}
-
-LINUX_IMAGE_DEB_FILE=${LINUX_IMAGE_DEB_FILE:-linux-image-${KERNEL_RELEASE}_amd64.deb}
-LINUX_IMAGE_DEB_URL=${LINUX_IMAGE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_IMAGE_DEB_FILE")}
-LINUX_HEADERS_DEB_FILE=${LINUX_HEADERS_DEB_FILE:-linux-headers-${KERNEL_RELEASE}_amd64.deb}
-LINUX_HEADERS_DEB_URL=${LINUX_HEADERS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LINUX_HEADERS_DEB_FILE")}
-
-LIBJSON_C3_DEB_FILE=${LIBJSON_C3_DEB_FILE:-$(select_static_deb_file "libjson-c3_${LIBJSON_C3_VERSION}_amd64.deb" "libjson-c3_" "_amd64.deb")}
-LIBJSON_C3_DEB_URL=${LIBJSON_C3_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBJSON_C3_DEB_FILE")}
-LIBSODIUM18_DEB_FILE=${LIBSODIUM18_DEB_FILE:-$(select_static_deb_file "libsodium18_${LIBSODIUM18_VERSION}_amd64.deb" "libsodium18_" "_amd64.deb")}
-LIBSODIUM18_DEB_URL=${LIBSODIUM18_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBSODIUM18_DEB_FILE")}
-LIBUV1_DEB_FILE=${LIBUV1_DEB_FILE:-$(select_static_deb_file "libuv1_${LIBUV1_VERSION}_amd64.deb" "libuv1_" "_amd64.deb")}
-LIBUV1_DEB_URL=${LIBUV1_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$LIBUV1_DEB_FILE")}
-TRACEBOX_DEB_FILE=${TRACEBOX_DEB_FILE:-tracebox_0.4.4_amd64.deb}
-TRACEBOX_DEB_URL=${TRACEBOX_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$TRACEBOX_DEB_FILE")}
-OMR_IPERF3_DEB_FILE=${OMR_IPERF3_DEB_FILE:-omr-iperf3_3.7-2_amd64.deb}
-OMR_IPERF3_DEB_URL=${OMR_IPERF3_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_IPERF3_DEB_FILE")}
-OMR_LIBIPERF0_DEB_FILE=${OMR_LIBIPERF0_DEB_FILE:-$(select_static_deb_file "omr-libiperf0_${OMR_LIBIPERF0_BINARY_VERSION}_amd64.deb" "omr-libiperf0_" "_amd64.deb")}
-OMR_LIBIPERF0_DEB_URL=${OMR_LIBIPERF0_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBIPERF0_DEB_FILE")}
-OMR_SHADOWSOCKS_DEB_FILE=${OMR_SHADOWSOCKS_DEB_FILE:-omr-shadowsocks-libev_${SHADOWSOCKS_BINARY_VERSION}_amd64.deb}
-OMR_SHADOWSOCKS_DEB_URL=${OMR_SHADOWSOCKS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SHADOWSOCKS_DEB_FILE")}
-OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE=${OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE:-$(select_static_deb_file "omr-libshadowsocks-libev2_${OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION}_amd64.deb" "omr-libshadowsocks-libev2_" "_amd64.deb")}
-OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL=${OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE")}
-OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE=${OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE:-$(select_static_deb_file "omr-libshadowsocks-libev-dev_${OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION}_amd64.deb" "omr-libshadowsocks-libev-dev_" "_amd64.deb")}
-OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL=${OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE")}
-PYTHON3_FLASK_DEB_FILE=${PYTHON3_FLASK_DEB_FILE:-$(select_static_deb_file "python3-flask_${PYTHON3_FLASK_VERSION}_all.deb" "python3-flask_" "_all.deb")}
-PYTHON3_FLASK_DEB_URL=${PYTHON3_FLASK_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_FLASK_DEB_FILE")}
-PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE=${PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE:-$(select_static_deb_file "python3-flask-jwt-simple_${PYTHON3_FLASK_JWT_SIMPLE_VERSION}_all.deb" "python3-flask-jwt-simple_" "_all.deb")}
-PYTHON3_FLASK_JWT_SIMPLE_DEB_URL=${PYTHON3_FLASK_JWT_SIMPLE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE")}
-PYTHON3_ITSDANGEROUS_DEB_FILE=${PYTHON3_ITSDANGEROUS_DEB_FILE:-$(select_static_deb_file "python3-itsdangerous_${PYTHON3_ITSDANGEROUS_VERSION}_all.deb" "python3-itsdangerous_" "_all.deb")}
-PYTHON3_ITSDANGEROUS_DEB_URL=${PYTHON3_ITSDANGEROUS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_ITSDANGEROUS_DEB_FILE")}
-PYTHON3_JINJA2_DEB_FILE=${PYTHON3_JINJA2_DEB_FILE:-$(select_static_deb_file "python3-jinja2_${PYTHON3_JINJA2_VERSION}_all.deb" "python3-jinja2_" "_all.deb")}
-PYTHON3_JINJA2_DEB_URL=${PYTHON3_JINJA2_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_JINJA2_DEB_FILE")}
-PYTHON3_MARKUPSAFE_DEB_FILE=${PYTHON3_MARKUPSAFE_DEB_FILE:-$(select_static_deb_file "python3-markupsafe_${PYTHON3_MARKUPSAFE_VERSION}_amd64.deb" "python3-markupsafe_" "_amd64.deb")}
-PYTHON3_MARKUPSAFE_DEB_URL=${PYTHON3_MARKUPSAFE_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_MARKUPSAFE_DEB_FILE")}
-PYTHON3_PYJWT_DEB_FILE=${PYTHON3_PYJWT_DEB_FILE:-$(select_static_deb_file "python3-pyjwt_${PYTHON3_PYJWT_VERSION}_all.deb" "python3-pyjwt_" "_all.deb")}
-PYTHON3_PYJWT_DEB_URL=${PYTHON3_PYJWT_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_PYJWT_DEB_FILE")}
-PYTHON3_UVICORN_DEB_FILE=${PYTHON3_UVICORN_DEB_FILE:-$(select_static_deb_file "python3-uvicorn_${PYTHON3_UVICORN_VERSION}_all.deb" "python3-uvicorn_" "_all.deb")}
-PYTHON3_UVICORN_DEB_URL=${PYTHON3_UVICORN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_UVICORN_DEB_FILE")}
-PYTHON3_UVLOOP_DEB_FILE=${PYTHON3_UVLOOP_DEB_FILE:-$(select_static_deb_file "python3-uvloop_${PYTHON3_UVLOOP_VERSION}_amd64.deb" "python3-uvloop_" "_amd64.deb")}
-PYTHON3_UVLOOP_DEB_URL=${PYTHON3_UVLOOP_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_UVLOOP_DEB_FILE")}
-PYTHON3_WATCHGOD_DEB_FILE=${PYTHON3_WATCHGOD_DEB_FILE:-$(select_static_deb_file "python3-watchgod_${PYTHON3_WATCHGOD_VERSION}_all.deb" "python3-watchgod_" "_all.deb")}
-PYTHON3_WATCHGOD_DEB_URL=${PYTHON3_WATCHGOD_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_WATCHGOD_DEB_FILE")}
-PYTHON3_WERKZEUG_DEB_FILE=${PYTHON3_WERKZEUG_DEB_FILE:-$(select_static_deb_file "python3-werkzeug_${PYTHON3_WERKZEUG_VERSION}_all.deb" "python3-werkzeug_" "_all.deb")}
-PYTHON3_WERKZEUG_DEB_URL=${PYTHON3_WERKZEUG_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$PYTHON3_WERKZEUG_DEB_FILE")}
-OMR_VPS_ADMIN_DEB_FILE=${OMR_VPS_ADMIN_DEB_FILE:-omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb}
-OMR_VPS_ADMIN_DEB_URL=${OMR_VPS_ADMIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_VPS_ADMIN_DEB_FILE")}
-OMR_SIMPLE_OBFS_DEB_FILE=${OMR_SIMPLE_OBFS_DEB_FILE:-omr-simple-obfs_${OBFS_BINARY_VERSION}_amd64.deb}
-OMR_SIMPLE_OBFS_DEB_URL=${OMR_SIMPLE_OBFS_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SIMPLE_OBFS_DEB_FILE")}
-OMR_MLVPN_DEB_FILE=${OMR_MLVPN_DEB_FILE:-omr-mlvpn_${MLVPN_BINARY_VERSION}_amd64.deb}
-OMR_MLVPN_DEB_URL=${OMR_MLVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_MLVPN_DEB_FILE")}
-OMR_GLORYTUN_DEB_FILE=${OMR_GLORYTUN_DEB_FILE:-omr-glorytun_${GLORYTUN_UDP_BINARY_VERSION}_amd64.deb}
-OMR_GLORYTUN_DEB_URL=${OMR_GLORYTUN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_GLORYTUN_DEB_FILE")}
-OMR_GLORYTUN_TCP_DEB_FILE=${OMR_GLORYTUN_TCP_DEB_FILE:-omr-glorytun-tcp_${GLORYTUN_TCP_BINARY_VERSION}_amd64.deb}
-OMR_GLORYTUN_TCP_DEB_URL=${OMR_GLORYTUN_TCP_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_GLORYTUN_TCP_DEB_FILE")}
-OMR_DSVPN_DEB_FILE=${OMR_DSVPN_DEB_FILE:-omr-dsvpn_${DSVPN_BINARY_VERSION}_amd64.deb}
-OMR_DSVPN_DEB_URL=${OMR_DSVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_DSVPN_DEB_FILE")}
-V2RAY_DEB_FILE=${V2RAY_DEB_FILE:-v2ray-${V2RAY_VERSION}-amd64.deb}
-V2RAY_DEB_URL=${V2RAY_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_DEB_FILE")}
-V2RAY_PLUGIN_DEB_FILE=${V2RAY_PLUGIN_DEB_FILE:-v2ray-plugin_${V2RAY_PLUGIN_VERSION}_amd64.deb}
-V2RAY_PLUGIN_DEB_URL=${V2RAY_PLUGIN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$V2RAY_PLUGIN_DEB_FILE")}
-OMR_SERVER_DEB_FILE=${OMR_SERVER_DEB_FILE:-$(select_static_deb_file "omr-server_${OMR_VERSION}_all.deb" "omr-server_" "_all.deb")}
-OMR_SERVER_DEB_URL=${OMR_SERVER_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OMR_SERVER_DEB_FILE")}
-OPENVPN_DEB_FILE=${OPENVPN_DEB_FILE:-$(select_static_deb_file "openvpn_${OPENVPN_BINARY_VERSION}_amd64.deb" "openvpn_" "_amd64.deb")}
-OPENVPN_DEB_URL=${OPENVPN_DEB_URL:-$(get_static_deb_url "$OMR_STATIC_DEB_BASE" "$OPENVPN_DEB_FILE")}
-
 set -e
 umask 0022
 export LC_ALL=C
@@ -349,13 +92,21 @@ if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
 # Check Linux version
 echo "Check Linux version..."
 if test -f /etc/os-release ; then
-        . /etc/os-release
+	. /etc/os-release
 else
-        . /usr/lib/os-release
+	. /usr/lib/os-release
 fi
-if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "11" ]; then
-        echo "This script only works with Debian Bullseye (11.x)"
-        exit 1
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" != "9" ] && [ "$VERSION_ID" != "10" ] && [ "$VERSION_ID" != "11" ]; then
+	echo "This script only work with Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
+	exit 1
+elif [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "18.04" ] && [ "$VERSION_ID" != "19.04" ] && [ "$VERSION_ID" != "20.04" ] && [ "$VERSION_ID" != "22.04" ]; then
+	echo "This script only work with Ubuntu 18.04, 19.04, 20.04 or 22.04"
+	echo "Use debian when possible"
+	exit 1
+elif [ "$ID" != "debian" ] && [ "$ID" != "ubuntu" ]; then
+	echo "This script only work with Ubuntu 18.04, Ubuntu 19.04, Ubutun 20.04, Ubuntu 22.04, Debian Stretch (9.x), Debian Buster (10.x) or Debian Bullseye (11.x)"
+	echo "Use Debian when possible"
+	exit 1
 fi
 
 echo "Check architecture..."
@@ -379,15 +130,10 @@ fi
 #	exit 1
 #fi
 echo "Check about broken packages..."
-set +e
-apt_get_check_status=0
-if ! apt-get check >/dev/null 2>&1; then
-        apt_get_check_status=$?
-fi
-set -e
-if [ "$apt_get_check_status" -ne 0 ]; then
-        echo "E: \`apt-get check\` failed, you may have broken packages. Aborting..."
-        exit 1
+apt-get check >/dev/null 2>&1
+if [ "$?" -ne 0 ]; then
+	echo "E: \`apt-get check\` failed, you may have broken packages. Aborting..."
+	exit 1
 fi
 
 # Fix old string...
@@ -412,9 +158,9 @@ if [ "$UPDATE" = "yes" ]; then
 	echo "Update mode"
 fi
 # Force update key
-[ "$USE_OMR_REPO" = "yes" ] && [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-        echo "Update OpenMPTCProuter repo key"
-        wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
+[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+	echo "Update OpenMPTCProuter repo key"
+	wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
 }
 
 CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}')"
@@ -422,36 +168,59 @@ if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
 	exit 1
 fi
 
-[ "$USE_OMR_REPO" = "yes" ] && [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
-        echo "Update ${REPO} key"
-        if [ "$CHINA" = "yes" ]; then
-                #wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-                wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-        else
-                wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-        fi
+[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+	echo "Update ${REPO} key"
+	if [ "$CHINA" = "yes" ]; then
+		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+		wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+	else
+		wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
+	fi
 }
 
 echo "Remove lock and update packages list..."
 rm -f /var/lib/dpkg/lock
 rm -f /var/lib/dpkg/lock-frontend
 rm -f /var/cache/apt/archives/lock
-apt-get update --allow-releaseinfo-change
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
+	apt-get update
+else
+	apt-get update --allow-releaseinfo-change
+fi
 rm -f /var/lib/dpkg/lock
 rm -f /var/lib/dpkg/lock-frontend
 rm -f /var/cache/apt/archives/lock
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server
 
-# Remove legacy distribution upgrade paths as the script now targets Debian 11 only
+#if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_DEBIAN" = "yes" ] && [ "$update" = "0" ]; then
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_OS" = "yes" ]; then
+	echo "Update Debian 9 Stretch to Debian 10 Buster"
+	apt-get -y -f --force-yes upgrade
+	apt-get -y -f --force-yes dist-upgrade
+	sed -i 's:stretch:buster:g' /etc/apt/sources.list
+	apt-get update --allow-releaseinfo-change
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
+	VERSION_ID="10"
+fi
+if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
+	echo "Update Ubuntu 18.04 to Ubuntu 20.04"
+	apt-get -y -f --force-yes upgrade
+	apt-get -y -f --force-yes dist-upgrade
+	sed -i 's:bionic:focal:g' /etc/apt/sources.list
+	apt-get update --allow-releaseinfo-change
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
+	VERSION_ID="20.04"
+fi
 
 # Add OpenMPTCProuter repo
 echo "Add OpenMPTCProuter repo..."
-if [ "$USE_OMR_REPO" = "yes" ]; then
-        if [ "$CHINA" = "yes" ]; then
-        echo "Install git..."
-        apt-get -y install git
-        if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
+if [ "$CHINA" = "yes" ]; then
+	echo "Install git..."
+	apt-get -y install git
+	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
 		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
 		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
 	fi
@@ -474,19 +243,18 @@ if [ "$USE_OMR_REPO" = "yes" ]; then
 		git checkout develop
 	else
 		git checkout master
-fi
-LOCALFILES="yes"
-TLS="no"
-DIR="/usr/share/omr-server-git"
-
-echo "deb [arch=amd64] https://${REPO} bullseye main" > /etc/apt/sources.list.d/openmptcprouter.list
-cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
-	Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
-	Package: *
-	Pin: origin ${REPO}
-	Pin-Priority: 1001
-EOF
-
+	fi
+	LOCALFILES="yes"
+	TLS="no"
+	DIR="/usr/share/omr-server-git"
+else
+	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+	cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
+		Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
+		Package: *
+		Pin: origin ${REPO}
+		Pin-Priority: 1001
+	EOF
 	if [ -n "$(echo $OMR_VERSION | grep test)" ]; then
 		echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
 		cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
@@ -497,15 +265,26 @@ EOF
 		EOF
 	else
 		rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
-        fi
-        wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-        fi
-else
-        rm -f /etc/apt/sources.list.d/openmptcprouter.list
-        rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
-        rm -f /etc/apt/preferences.d/openmptcprouter.pref
+	fi
+	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
 fi
 
+#apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
+if [ "$ID" = "debian" ]; then
+	if [ "$VERSION_ID" = "9" ]; then
+		#echo 'deb http://dl.bintray.com/cpaasch/deb jessie main' >> /etc/apt/sources.list
+		echo 'deb http://deb.debian.org/debian stretch-backports main' > /etc/apt/sources.list.d/stretch-backports.list
+	fi
+	# Add buster-backports repo
+	echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/buster-backports.list
+elif [ "$ID" = "ubuntu" ]; then
+	echo 'deb http://archive.ubuntu.com/ubuntu bionic-backports main' > /etc/apt/sources.list.d/bionic-backports.list
+	echo 'deb http://archive.ubuntu.com/ubuntu bionic universe' > /etc/apt/sources.list.d/bionic-universe.list
+	[ "$VERSION_ID" = "22.04" ] && {
+		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32
+		echo 'deb http://old-releases.ubuntu.com/ubuntu impish main universe' > /etc/apt/sources.list.d/impish-universe.list
+	}
+fi
 # Install mptcp kernel and shadowsocks
 echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
@@ -553,12 +332,11 @@ if [ "$SOURCES" = "yes" ]; then
 else
 	cd /boot
 	rename 's/^bzImage/vmlinuz/s' * >/dev/null 2>&1
-        if [ "$(dpkg -l | grep linux-image-${KERNEL_VERSION} | grep ${KERNEL_PACKAGE_VERSION})" = "" ]; then
-                echo "Install kernel linux-image-${KERNEL_RELEASE}"
-                echo "\033[1m !!! if kernel install fail run: dpkg --remove --force-remove-reinstreq linux-image-${KERNEL_VERSION}-mptcp !!! \033[0m"
-                install_omr_package "linux-image-${KERNEL_VERSION}-mptcp" "${KERNEL_PACKAGE_VERSION}" "$LINUX_IMAGE_DEB_FILE" "$LINUX_IMAGE_DEB_URL"
-                install_omr_package "linux-headers-${KERNEL_VERSION}-mptcp" "${KERNEL_PACKAGE_VERSION}" "$LINUX_HEADERS_DEB_FILE" "$LINUX_HEADERS_DEB_URL"
-        fi
+	if [ "$(dpkg -l | grep linux-image-${KERNEL_VERSION} | grep ${KERNEL_PACKAGE_VERSION})" = "" ]; then
+		echo "Install kernel linux-image-${KERNEL_RELEASE}"
+		echo "\033[1m !!! if kernel install fail run: dpkg --remove --force-remove-reinstreq linux-image-${KERNEL_VERSION}-mptcp !!! \033[0m"
+		apt-get -y install linux-image-${KERNEL_VERSION}-mptcp=${KERNEL_PACKAGE_VERSION} linux-headers-${KERNEL_VERSION}-mptcp=${KERNEL_PACKAGE_VERSION}
+	fi
 fi
 
 # Check if mptcp kernel is grub default kernel
@@ -576,13 +354,9 @@ bash update-grub.sh ${KERNEL_RELEASE}
 [ -f /boot/grub/grub.cfg ] && sed -i 's/default="1>0"/default="0"/' /boot/grub/grub.cfg 2>&1 >/dev/null
 
 echo "Install tracebox OpenMPTCProuter edition"
-apt-get -y install liblua5.2-0 libpcap0.8 libnetfilter-queue1 libcurl4-gnutls-dev
-install_omr_package "libjson-c3" "$LIBJSON_C3_VERSION" "$LIBJSON_C3_DEB_FILE" "$LIBJSON_C3_DEB_URL" "--allow-downgrades"
-install_omr_package "tracebox" "" "$TRACEBOX_DEB_FILE" "$TRACEBOX_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
+apt-get -y -o Dpkg::Options::="--force-overwrite" install tracebox
 echo "Install iperf3 OpenMPTCProuter edition"
-apt-get -y install libsctp1
-install_omr_package "omr-libiperf0" "$OMR_LIBIPERF0_BINARY_VERSION" "$OMR_LIBIPERF0_DEB_FILE" "$OMR_LIBIPERF0_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
-install_omr_package "omr-iperf3" "" "$OMR_IPERF3_DEB_FILE" "$OMR_IPERF3_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
+apt-get -y -o Dpkg::Options::="--force-overwrite" install omr-iperf3
 
 if [ "$UPSTREAM" = "yes" ]; then
 	echo "Compile and install mptcpize..."
@@ -663,9 +437,19 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -f /var/lib/dpkg/lock-frontend
 	systemctl enable haveged
 	
-        rm -f /var/lib/dpkg/lock
-        rm -f /var/lib/dpkg/lock-frontend
-        apt-get -y install libsodium-dev
+	if [ "$ID" = "debian" ]; then
+		rm -f /var/lib/dpkg/lock
+		rm -f /var/lib/dpkg/lock-frontend
+		if [ "$VERSION_ID" = "9" ]; then
+			apt -y -t stretch-backports install libsodium-dev
+		else
+			apt -y install libsodium-dev
+		fi
+	elif [ "$ID" = "ubuntu" ]; then
+		rm -f /var/lib/dpkg/lock
+		rm -f /var/lib/dpkg/lock-frontend
+		apt-get -y install libsodium-dev
+	fi
 	#cd /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
@@ -683,11 +467,7 @@ if [ "$SOURCES" = "yes" ]; then
 	#rm -rf /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}
 	rm -rf /tmp/shadowsocks-libev
 else
-        install_omr_package "libsodium18" "$LIBSODIUM18_VERSION" "$LIBSODIUM18_DEB_FILE" "$LIBSODIUM18_DEB_URL" "--allow-downgrades"
-        install_omr_package "libshadowsocks-libev2" "$LIBSHADOWSOCKS_LIBEV2_VERSION" "$LIBSHADOWSOCKS_LIBEV2_DEB_FILE" "$LIBSHADOWSOCKS_LIBEV2_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
-        install_omr_package "omr-libshadowsocks-libev2" "$OMR_LIBSHADOWSOCKS_LIBEV2_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV2_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
-        install_omr_package "omr-libshadowsocks-libev-dev" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_BINARY_VERSION" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_FILE" "$OMR_LIBSHADOWSOCKS_LIBEV_DEV_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
-        install_omr_package "omr-shadowsocks-libev" "${SHADOWSOCKS_BINARY_VERSION}" "$OMR_SHADOWSOCKS_DEB_FILE" "$OMR_SHADOWSOCKS_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
+	apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" install omr-shadowsocks-libev=${SHADOWSOCKS_BINARY_VERSION}
 fi
 
 # Load OLIA Congestion module at boot time
@@ -740,24 +520,48 @@ if systemctl -q is-active omr-admin.service; then
 fi
 
 if [ "$OMR_ADMIN" = "yes" ]; then
-        echo 'Install OpenMPTCProuter VPS Admin'
-        apt-get -y install python3-openssl python3-pip python3-setuptools python3-wheel python3-dev
-        #apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
-        #apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
-        install_omr_package "libuv1" "$LIBUV1_VERSION" "$LIBUV1_DEB_FILE" "$LIBUV1_DEB_URL" "--allow-downgrades"
-        apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr
-        install_omr_package "python3-flask" "$PYTHON3_FLASK_VERSION" "$PYTHON3_FLASK_DEB_FILE" "$PYTHON3_FLASK_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-flask-jwt-simple" "$PYTHON3_FLASK_JWT_SIMPLE_VERSION" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_FILE" "$PYTHON3_FLASK_JWT_SIMPLE_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-itsdangerous" "$PYTHON3_ITSDANGEROUS_VERSION" "$PYTHON3_ITSDANGEROUS_DEB_FILE" "$PYTHON3_ITSDANGEROUS_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-jinja2" "$PYTHON3_JINJA2_VERSION" "$PYTHON3_JINJA2_DEB_FILE" "$PYTHON3_JINJA2_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-markupsafe" "$PYTHON3_MARKUPSAFE_VERSION" "$PYTHON3_MARKUPSAFE_DEB_FILE" "$PYTHON3_MARKUPSAFE_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-pyjwt" "$PYTHON3_PYJWT_VERSION" "$PYTHON3_PYJWT_DEB_FILE" "$PYTHON3_PYJWT_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-uvicorn" "$PYTHON3_UVICORN_VERSION" "$PYTHON3_UVICORN_DEB_FILE" "$PYTHON3_UVICORN_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-uvloop" "$PYTHON3_UVLOOP_VERSION" "$PYTHON3_UVLOOP_DEB_FILE" "$PYTHON3_UVLOOP_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-watchgod" "$PYTHON3_WATCHGOD_VERSION" "$PYTHON3_WATCHGOD_DEB_FILE" "$PYTHON3_WATCHGOD_DEB_URL" "--allow-downgrades"
-        install_omr_package "python3-werkzeug" "$PYTHON3_WERKZEUG_VERSION" "$PYTHON3_WERKZEUG_DEB_FILE" "$PYTHON3_WERKZEUG_DEB_URL" "--allow-downgrades"
-        pip3 -q install uvloop
-        apt-get -y --allow-downgrades install jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
+	echo 'Install OpenMPTCProuter VPS Admin'
+	if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
+		#echo 'deb http://ftp.de.debian.org/debian buster main' > /etc/apt/sources.list.d/buster.list
+		#echo 'APT::Default-Release "stretch";' | tee -a /etc/apt/apt.conf.d/00local
+		#apt-get update
+		#apt-get -y -t buster install python3.7-dev
+		#apt-get -y -t buster install python3-pip python3-setuptools python3-wheel
+		if [ "$(whereis python3 | grep python3.7)" = "" ]; then
+			apt-get -y install libffi-dev build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev wget
+			wget -O /tmp/Python-3.7.2.tgz https://www.python.org/ftp/python/3.7.2/Python-3.7.2.tgz
+			cd /tmp
+			tar xzf Python-3.7.2.tgz
+			cd Python-3.7.2
+			./configure --enable-optimizations
+			make
+			make altinstall
+			cd /tmp
+			rm -rf /tmp/Python-3.7.2
+			update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.7 1
+			update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip3.7 1
+			sed -i 's:/usr/bin/python3 :/usr/bin/python3\.7 :g' /usr/bin/lsb_release
+		fi
+		pip3 -q install setuptools wheel
+		pip3 -q install pyopenssl
+	else
+		apt-get -y install python3-openssl python3-pip python3-setuptools python3-wheel python3-dev
+	fi
+	#apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
+	#apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
+	if [ "$ID" = "ubuntu" ]; then
+		apt-get -y install python3-passlib python3-netaddr
+		apt-get -y remove python3-jwt
+		pip3 -q install pyjwt
+	else
+		if [ "$ID" = "debian" ] && ([ "$VERSION_ID" = "10" ] || [ "$VERSION_ID" = "11" ]); then
+			apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
+			pip3 -q install uvloop
+		else
+			apt-get -y install python3-passlib python3-jwt python3-netaddr libuv1 python3-uvloop
+		fi
+	fi
+	apt-get -y --allow-downgrades install python3-uvicorn jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
 	echo '-- pip3 install needed python modules'
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
 	#pip3 install pyjwt passlib uvicorn fastapi netjsonconfig python-multipart netaddr
@@ -804,7 +608,7 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && [ "$OMR_ADMIN_PASS_ADMIN2" != "AdminMySecretKey" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		fi
-            install_omr_package "omr-vps-admin" "${OMR_ADMIN_BINARY_VERSION}" "$OMR_VPS_ADMIN_DEB_FILE" "$OMR_VPS_ADMIN_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
+		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}
 		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
 			cp /usr/share/omr-admin/omr-admin-config.json /etc/openmptcprouter-vps-admin/
 		fi
@@ -910,9 +714,15 @@ if [ "$OBFS" = "yes" ]; then
 	if [ "$SOURCES" = "yes" ]; then
 		rm -rf /tmp/simple-obfs
 		cd /tmp
-                rm -f /var/lib/dpkg/lock
-                rm -f /var/lib/dpkg/lock-frontend
-                apt-get install -y --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
+		rm -f /var/lib/dpkg/lock
+		rm -f /var/lib/dpkg/lock-frontend
+		if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
+			#apt-get install -y --no-install-recommends -t buster libssl-dev
+			apt-get install -y --no-install-recommends libssl-dev
+			apt-get install -y --no-install-recommends build-essential autoconf libtool libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
+		else
+			apt-get install -y --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git ca-certificates
+		fi
 		git clone https://github.com/shadowsocks/simple-obfs.git /tmp/simple-obfs
 		cd /tmp/simple-obfs
 		git checkout ${OBFS_VERSION}
@@ -925,7 +735,7 @@ if [ "$OBFS" = "yes" ]; then
 	else
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
-            install_omr_package "omr-simple-obfs" "${OBFS_BINARY_VERSION}" "$OMR_SIMPLE_OBFS_DEB_FILE" "$OMR_SIMPLE_OBFS_DEB_URL" "-o" "Dpkg::Options::=--force-overwrite"
+		apt-get -y -o Dpkg::Options::="--force-overwrite" install omr-simple-obfs=${OBFS_BINARY_VERSION}
 	fi
 	#sed -i 's%"mptcp": true%"mptcp": true,\n"plugin": "/usr/local/bin/obfs-server",\n"plugin_opts": "obfs=http;mptcp;fast-open;t=400"%' /etc/shadowsocks-libev/config.json
 fi
@@ -960,7 +770,7 @@ if [ "$V2RAY_PLUGIN" = "yes" ]; then
 	else
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
-                install_omr_package "v2ray-plugin" "${V2RAY_PLUGIN_VERSION}" "$V2RAY_PLUGIN_DEB_FILE" "$V2RAY_PLUGIN_DEB_URL"
+		apt-get -y install v2ray-plugin=${V2RAY_PLUGIN_VERSION}
 	fi
 fi
 
@@ -980,7 +790,7 @@ if [ "$V2RAY" = "yes" ]; then
 		dpkg --force-all -i -B /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
 		rm -f /tmp/v2ray-${V2RAY_VERSION}-amd64.deb
 	else
-                install_omr_package "v2ray" "${V2RAY_VERSION}" "$V2RAY_DEB_FILE" "$V2RAY_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-overwrite"
+		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
 	fi
 	if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
@@ -1044,7 +854,7 @@ if [ "$MLVPN" = "yes" ]; then
 			fi
 		fi
 	else
-                install_omr_package "omr-mlvpn" "${MLVPN_BINARY_VERSION}" "$OMR_MLVPN_DEB_FILE" "$OMR_MLVPN_DEB_URL" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-confdef"
+		apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install omr-mlvpn=${MLVPN_BINARY_VERSION}
 	fi
 	if [ "$mlvpnupdate" = "0" ]; then
 		sed -i "s:MLVPN_PASS:$MLVPN_PASS:" /etc/mlvpn/mlvpn0.conf
@@ -1175,8 +985,7 @@ if [ "$OPENVPN" = "yes" ]; then
 	echo "Install OpenVPN"
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
-        install_omr_package "openvpn" "$OPENVPN_BINARY_VERSION" "$OPENVPN_DEB_FILE" "$OPENVPN_DEB_URL" "--allow-downgrades"
-        apt-get -y install easy-rsa
+	apt-get -y install openvpn easy-rsa
 	#wget -O /lib/systemd/network/openvpn.network ${VPSURL}${VPSPATH}/openvpn.network
 	rm -f /lib/systemd/network/openvpn.network
 	#if [ ! -f "/etc/openvpn/server/static.key" ]; then
@@ -1184,6 +993,32 @@ if [ "$OPENVPN" = "yes" ]; then
 	#	cd /etc/openvpn/server
 	#	openvpn --genkey --secret static.key
 	#fi
+	if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ ! -d /etc/openvpn/ca ]; then
+		wget -O /tmp/EasyRSA-unix-v${EASYRSA_VERSION}.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.6/EasyRSA-unix-v${EASYRSA_VERSION}.tgz
+		cd /tmp
+		tar xzvf EasyRSA-unix-v${EASYRSA_VERSION}.tgz
+		cd /tmp/EasyRSA-v${EASYRSA_VERSION}
+		mkdir -p /etc/openvpn/ca
+		cp easyrsa /etc/openvpn/ca/
+		cp openssl-easyrsa.cnf /etc/openvpn/ca/
+		cp vars.example /etc/openvpn/ca/vars
+		cp -r x509-types /etc/openvpn/ca/
+
+		#mkdir -p /etc/openvpn/ca/pki/private /etc/openvpn/ca/pki/issued
+		#./easyrsa init-pki
+		#./easyrsa --batch build-ca nopass
+		#EASYRSA_CERT_EXPIRE=3650 ./easyrsa build-server-full server nopass
+		#EASYRSA_CERT_EXPIRE=3650 EASYRSA_REQ_CN=openmptcprouter ./easyrsa build-client-full "openmptcprouter" nopass
+		#EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
+		#mv pki/ca.crt /etc/openvpn/ca/pki/ca.crt
+		#mv pki/private/ca.key /etc/openvpn/ca/pki/private/ca.key
+		#mv pki/issued/server.crt /etc/openvpn/ca/pki/issued/server.crt
+		#mv pki/private/server.key /etc/openvpn/ca/pki/private/server.key
+		#mv pki/crl.pem /etc/openvpn/ca/pki/crl.pem
+		#mv pki/issued/openmptcprouter.crt /etc/openvpn/ca/pki/issued/openmptcprouter.crt
+		#mv pki/private/openmptcprouter.key /etc/openvpn/ca/pki/private/openmptcprouter.key
+	fi
+
 	if [ -f "/etc/openvpn/server/server.crt" ]; then
 		if [ ! -d /etc/openvpn/ca ]; then
 			make-cadir /etc/openvpn/ca
@@ -1308,7 +1143,7 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -rf /tmp/glorytun-udp
 else
 	rm -f /usr/local/bin/glorytun
-        install_omr_package "omr-glorytun" "${GLORYTUN_UDP_BINARY_VERSION}" "$OMR_GLORYTUN_DEB_FILE" "$OMR_GLORYTUN_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite" "--reinstall"
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun=${GLORYTUN_UDP_BINARY_VERSION}
 	GLORYTUN_PASS="$(cat /etc/glorytun-udp/tun0.key | tr -d '\n')"
 fi
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-udp/tun0
@@ -1354,7 +1189,7 @@ if [ "$DSVPN" = "yes" ]; then
 		cd /tmp
 		rm -rf /tmp/dsvpn
 	else
-                install_omr_package "omr-dsvpn" "${DSVPN_BINARY_VERSION}" "$OMR_DSVPN_DEB_FILE" "$OMR_DSVPN_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite"
+		apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install omr-dsvpn=${DSVPN_BINARY_VERSION}
 		DSVPN_PASS=$(cat /etc/dsvpn/dsvpn0.key | tr -d "\n")
 	fi
 	if [ "$UPSTREAM" = "yes" ]; then
@@ -1367,7 +1202,15 @@ if systemctl -q is-active glorytun-tcp@tun0.service; then
 	systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
 fi
 if [ "$SOURCES" = "yes" ]; then
-        apt-get -y install libsodium-dev
+	if [ "$ID" = "debian" ]; then
+		if [ "$VERSION_ID" = "9" ]; then
+			apt -t stretch-backports -y install libsodium-dev
+		else
+			apt -y install libsodium-dev
+		fi
+	elif [ "$ID" = "ubuntu" ]; then
+		apt-get -y install libsodium-dev
+	fi
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
 	rm -f /usr/bin/glorytun-tcp
@@ -1406,7 +1249,7 @@ if [ "$SOURCES" = "yes" ]; then
 	rm -rf /tmp/glorytun-0.0.35
 else
 	rm -f /usr/local/bin/glorytun-tcp
-        install_omr_package "omr-glorytun-tcp" "${GLORYTUN_TCP_BINARY_VERSION}" "$OMR_GLORYTUN_TCP_DEB_FILE" "$OMR_GLORYTUN_TCP_DEB_URL" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--force-confold" "-o" "Dpkg::Options::=--force-overwrite" "--reinstall"
+	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun-tcp=${GLORYTUN_TCP_BINARY_VERSION}
 fi
 [ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
 
@@ -1523,6 +1366,17 @@ else
 	fi
 fi
 [ -z "$(grep nf_conntrack_sip /etc/modprobe.d/blacklist.conf)" ] && echo 'blacklist nf_conntrack_sip' >> /etc/modprobe.d/blacklist.conf
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "10" ]; then
+	apt-get -y install iptables
+	update-alternatives --set iptables /usr/sbin/iptables-legacy
+	update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+fi
+if ([ "$ID" = "debian" ] && [ "$VERSION_ID" = "10" ]) || ([ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "19.04" ]) || ([ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "20.04" ]); then
+	sed -i 's:DROP_DEFAULT=Drop:DROP_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall/shorewall.conf
+	sed -i 's:REJECT_DEFAULT=Reject:REJECT_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall/shorewall.conf
+	sed -i 's:DROP_DEFAULT=Drop:DROP_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall6/shorewall6.conf
+	sed -i 's:REJECT_DEFAULT=Reject:REJECT_DEFAULT="Broadcast(DROP),Multicast(DROP)":g' /etc/shorewall6/shorewall6.conf
+fi
 if [ "$(ip r | awk '/default/&&/src/ {print $7}')" != "" ] && [ "$(ip r | awk '/default/&&/src/ {print $7}')" != "dhcp" ]; then
 	sed -i "s/MASQUERADE/SNAT($(ip r | awk '/default/&&/src/ {print $7}'))/" /etc/shorewall/snat
 fi
@@ -1586,7 +1440,7 @@ else
 fi
 
 if [ "$SOURCES" != "yes" ]; then
-        install_omr_package "omr-server" "${OMR_VERSION}" "$OMR_SERVER_DEB_FILE" "$OMR_SERVER_DEB_URL" >/dev/null 2>&1 || true
+	apt-get -y install omr-server=${OMR_VERSION} 2>&1 >/dev/null || true
 	rm -f /etc/openmtpcprouter-vps-admin/update-bin
 fi
 
