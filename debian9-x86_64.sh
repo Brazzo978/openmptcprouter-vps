@@ -433,11 +433,9 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	#pip3 install pyjwt passlib uvicorn fastapi netjsonconfig python-multipart netaddr
 	#pip3 -q install fastapi netjsonconfig python-multipart uvicorn -U
 	pip3 -q install netjsonconfig
-	pip3 -q install fastapi -U
+	pip3 -q install "fastapi<0.100" "pydantic<2" "starlette<0.28"
 	pip3 -q install jsonschema -U
 	pip3 -q install python-multipart jinja2 -U
-	pip3 -q install starlette
-	pip3 -q install starlette
 	mkdir -p /etc/openmptcprouter-vps-admin/omr-6in4
 	mkdir -p /etc/openmptcprouter-vps-admin/intf
 	[ ! -f "/etc/openmptcprouter-vps-admin/current-vpn" ] && echo "glorytun_tcp" > /etc/openmptcprouter-vps-admin/current-vpn
