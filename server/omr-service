@@ -1,0 +1,166 @@
+#!/bin/bash
+# OpenMPTCProuter VPS service script
+
+_multipath() {
+	# Force multipath status
+	source /etc/shorewall/params.net
+	for intf in `ls -1 /sys/class/net`; do
+		if [ "$intf" != "bonding_masters" ]; then
+			if ([ "$(ip a show dev lo | grep -v inet6 | grep global)" != "" ] && [ "$intf" = "lo" ]) || ([ "$intf" = "$NET_IFACE" ] && [ "$(ip a show dev lo | grep -v inet6 | grep global)" = "" ]); then
+				[ -f /proc/sys/net/mptcp/mptcp_enabled ] && [ "$(multipath $intf | tr -d '\n')" != "$intf is in default mode" ] && multipath $intf on
+				[ -f /proc/sys/net/mptcp/enabled ] && [ "$(multipath $intf | tr -d '\n')" != "$intf is in signal mode" ] && {
+					multipath $intf signal
+					ip mptcp limits set subflows 8 add_addr_accepted 8 2>&1 >/dev/null
+				}
+			else
+				[ "$(multipath $intf | tr -d '\n')" != "$intf is deactivated" ] && multipath $intf off
+			fi
+		fi
+	done
+}
+
+_glorytun_udp() {
+	if [ -n "$(systemctl -a | grep 'glorytun-udp')" ]; then
+		[ -z "$(glorytun show dev gt-udp-tun0 2>/dev/null | grep tunnel)" ] && {
+			logger -t "OMR-Service" "Restart Glorytun-UDP"
+			systemctl -q restart 'glorytun-udp@*'
+			sleep 10
+		}
+		for intf in /etc/glorytun-udp/tun*; do
+			[ "$(echo $intf | grep key)" = "" ] && /etc/glorytun-udp/post.sh ${intf}
+		done
+	fi
+}
+
+_glorytun_tcp() {
+	if [ -n "$(systemctl -a | grep 'glorytun-tcp')" ]; then
+		for intf in /etc/glorytun-tcp/tun*; do
+			[ "$(echo $intf | grep key)" = "" ] && /etc/glorytun-tcp/post.sh ${intf}
+		done
+		if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "glorytun_tcp" ]; then
+			localip="$(cat /etc/glorytun-tcp/tun0 | grep LOCALIP | cut -d '=' -f2)"
+			[ -z "$localip" ] && localip="10.255.255.1"
+			remoteip="$(echo $localip | sed 's/\.1/\.2/')"
+			if [ "$(ping -c 5 -w 5 $remoteip | grep '100%')" != "" ] && ([ -z "$(pgrep glorytun-tcp)" ] || [ "$(expr $(date +%s) - $(stat -c %Y /proc/$(pgrep glorytun-tcp)/exe ))" -gt "300" ]); then
+				logger -t "OMR-Service" "No answer from VPN client end, restart Glorytun-TCP"
+				systemctl restart glorytun-tcp@tun0
+				sleep 10
+			fi
+		fi
+	fi
+}
+
+_dsvpn() {
+	[ -n "$(ip -6 r show 64:ff9b::/96 dev dsvpn0)" ] && ip -6 r del 64:ff9b::/96 dev dsvpn0 2>&1 >/dev/null
+	if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "dsvpn" ]; then
+		localip="$(cat /etc/dsvpn/dsvpn0 | grep LOCALTUNIP | cut -d '=' -f2)"
+		[ -z "$localip" ] && localip="10.255.251.1"
+		remoteip="$(echo $localip | sed 's/\.1/\.2/')"
+		if [ "$(ping -c 5 -w 5 $remoteip | grep '100%')" != "" ] && [ "$(expr $(date +%s) - $(stat -c %Y /proc/$(pgrep dsvpn)/exe ))" -gt "300" ]; then
+			logger -t "OMR-Service" "No answer from VPN client end, restart DSVPN"
+			systemctl restart dsvpn@dsvpn0
+		fi
+	fi
+}
+
+_shadowsocks() {
+	[ -n "$(systemctl -a | grep 'shadowsocks')" ] && [ -z "$(pgrep ss-server)" ] && {
+		logger -t "OMR-Service" "ss-server not detected, restart Shadowsocks"
+		systemctl restart shadowsocks-libev-manager@manager
+	}
+}
+
+_wireguard() {
+	if [ -n "$(systemctl -a | grep 'wg')" ]; then
+		[ -z "$(ip a show dev wg0 | grep '10.255.247.1')" ] && ip a add 10.255.247.1/24 dev wg0 2>&1 >/dev/null
+		[ -z "$(ip a show dev client-wg0 | grep '10.255.246.1')" ] && ip a add 10.255.246.1/24 dev client-wg0 2>&1 >/dev/null
+	fi
+}
+
+
+_omr_api() {
+	[ -z "$(pgrep curl)" ] && [ -z "$(curl -s -k -m 30 https://127.0.0.1:65500/)" ] && {
+		logger -t "OMR-Service" "Restart OMR-Admin"
+		systemctl -q restart omr-admin
+	}
+}
+
+_lan_route() {
+	cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -c '.users[0][]?' |
+	while IFS=$"\n" read -r c; do
+		if [ -n "$c" ]; then
+			vpnremoteip=$(echo "$c" | jq -r '.vpnremoteip')
+			if [ -n "$vpnremoteip" ] && [ "$vpnremoteip" != "null" ]; then
+				echo "$c" | jq -c -r '.lanips[]? //empty' | 
+				while IFS=$"\n" read -r d; do
+					if [ "$d" != "" ]; then
+						network=$(ipcalc -n $d | grep Network | awk '{print $2}')
+						[ -n "$network" ] && [ -z "$(ip r show $network via $vpnremoteip)" ] && ip r replace $network via $vpnremoteip 2>&1 >/dev/null
+					fi
+				done
+			fi
+		fi
+	done
+}
+
+_gre_tunnels() {
+	. "$(readlink -f "/etc/shorewall/params.vpn")"
+	if [ -n "$OMR_ADDR" ]; then
+		for intf in /etc/openmptcprouter-vps-admin/intf/*; do
+			if [ -f "$intf" ]; then
+				. "$(readlink -f "$intf")"
+				iface="$(basename $intf)"
+				if [ "$(ip tunnel show $iface 2>/dev/null | awk '{print $4}')" != "$OMR_ADDR" ]; then
+					ip tunnel del $iface 2>&1 >/dev/null
+					ip tunnel add $iface mode gre local $INTFADDR remote $OMR_ADDR 2>&1 >/dev/null
+					ip link set $iface up 2>&1 >/dev/null
+					ip addr add $LOCALIP dev $iface 2>&1 >/dev/null
+					ip route add $NETWORK dev $iface 2>&1 >/dev/null
+				fi
+			fi
+		done
+	fi
+}
+
+_openvpn_bonding() {
+	if [ "$(ip link show ovpnbonding1)" != "" ] && ([ "$(ip link show ovpnbonding1 | grep SLAVE)" = "" ] || [ "$(ip link show omr-bonding | grep DOWN)" != "" ] || [ "$(ip link show | grep ovpnbonding | grep -c SLAVE | tr -d '\n')" != "8" ]); then
+		echo 0 > /sys/class/net/omr-bonding/bonding/mode 2>&1 >/dev/null
+		ip link set ovpnbonding1 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding1 up 2>&1 >/dev/null
+		ip link set ovpnbonding2 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding2 up 2>&1 >/dev/null
+		ip link set ovpnbonding3 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding3 up 2>&1 >/dev/null
+		ip link set ovpnbonding4 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding4 up 2>&1 >/dev/null
+		ip link set ovpnbonding5 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding5 up 2>&1 >/dev/null
+		ip link set ovpnbonding6 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding6 up 2>&1 >/dev/null
+		ip link set ovpnbonding7 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding7 up 2>&1 >/dev/null
+		ip link set ovpnbonding8 master omr-bonding 2>&1 >/dev/null
+		ip link set ovpnbonding8 up 2>&1 >/dev/null
+		ip link set omr-bonding up mtu 1440 2>&1 >/dev/null
+		ip a add 10.255.248.1 dev omr-bonding 2>&1 >/dev/null
+		ip r add 10.255.248.0/24 dev omr-bonding 2>&1 >/dev/null
+		ip r add 10.255.248.2 dev omr-bonding src 10.255.248.1 2>&1 >/dev/null
+	fi
+}
+
+sysctl -p /etc/sysctl.d/90-shadowsocks.conf 2>&1 >/dev/null
+modprobe bonding 2>&1 >/dev/null
+ip link add omr-bonding type bond 2>&1 >/dev/null
+while true; do
+	_glorytun_udp
+	_glorytun_tcp
+	_shadowsocks
+	_dsvpn
+	_wireguard
+	_multipath
+	_omr_api
+	_lan_route
+	_gre_tunnels
+	_openvpn_bonding
+	sleep 10
+done

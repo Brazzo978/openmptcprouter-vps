@@ -1,0 +1,26 @@
+#
+# Shorewall version 4.0 - Sample Interfaces File for two-interface configuration.
+# Copyright (C) 2006-2014 by the Shorewall Team
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# See the file README.txt for further details.
+#------------------------------------------------------------------------------
+# For information about entries in this file, type "man shorewall-interfaces"
+###############################################################################
+?FORMAT 2
+###############################################################################
+#ZONE   INTERFACE       OPTIONS
+net	$NET_IFACE	dhcp,tcpflags,routefilter,nosmurfs,sourceroute=0
+vpn	gt-tun+		nosmurfs,tcpflags
+vpn	gt-udp-tun+	nosmurfs,tcpflags
+vpn	mlvpn+		nosmurfs,tcpflags
+vpn	tun+		nosmurfs,tcpflags
+vpn	wg+		nosmurfs,tcpflags
+vpncl	client-wg+	nosmurfs,tcpflags
+vpn	dsvpn+		nosmurfs,tcpflags
+vpn	gre-user+	nosmurfs,tcpflags
+vpn	omr-bonding	nosmurfs,tcpflags
