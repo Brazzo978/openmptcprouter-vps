@@ -59,9 +59,9 @@ IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 DEFAULT_USER="openmptcprouter"
 VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
-VPSPATH="server"
+VPSPATH="omr-vps-0.1028-def/server"
 VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com)}
-VPSURL="https://www.openmptcprouter.com/"
+VPSURL="https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 
