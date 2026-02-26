@@ -234,7 +234,9 @@ fi
 	echo "Update ${REPO} key"
 	apt-key del '2FDF 70C8 228B 7F04 42FE  59F6 608F D17B 2B24 D936' >/dev/null 2>&1 || true
 	rm -f /etc/apt/trusted.gpg.d/openmptcprouter.gpg
-	if [ "$CHINA" != "yes" ]; then
+	if [ "$CHINA" = "yes" ]; then
+		echo "deb [arch=amd64 trusted=yes] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
+	else
 		if command -v gpg >/dev/null 2>&1; then
 			wget -q -O - https://${REPO}/openmptcprouter.gpg.key | gpg --dearmor -o /usr/share/keyrings/openmptcprouter-archive-keyring.gpg
 		else
