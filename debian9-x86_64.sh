@@ -1012,6 +1012,190 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	fi
 fi
 
+# OMR 6.x compatibility bridge for scheduler/CC sync on modern kernels
+mkdir -p /usr/share/bpf/scheduler
+if ! ls /usr/share/bpf/scheduler/mptcp_bpf_*.o >/dev/null 2>&1; then
+	MPTCP_BPF_SCHED_URL="${MPTCP_BPF_SCHED_URL:-${VPSURL%/}/kernel/mptcp-bpf-schedulers.tar.gz}"
+	wget -q -O /tmp/mptcp-bpf-schedulers.tar.gz "${MPTCP_BPF_SCHED_URL}" || true
+	if [ -s /tmp/mptcp-bpf-schedulers.tar.gz ]; then
+		tar xzf /tmp/mptcp-bpf-schedulers.tar.gz -C /usr/share/bpf/scheduler >/dev/null 2>&1 || true
+	fi
+fi
+rm -f /tmp/mptcp-bpf-schedulers.tar.gz >/dev/null 2>&1 || true
+
+cat > /usr/local/sbin/load-mptcp-bpf-schedulers.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+DIR=/usr/share/bpf/scheduler
+PIN=/sys/fs/bpf/mptcp_sched
+command -v bpftool >/dev/null 2>&1 || exit 0
+mkdir -p "$PIN"
+
+register_one() {
+	local obj="$1"
+	local map_name="$2"
+	[ -f "$obj" ] || return 0
+	if bpftool struct_ops list 2>/dev/null | awk '{print $2}' | grep -qx "$map_name"; then
+		return 0
+	fi
+	bpftool struct_ops register "$obj" "$PIN"
+}
+
+register_one "$DIR/mptcp_bpf_bkup.o" bkup
+register_one "$DIR/mptcp_bpf_burst.o" burst
+register_one "$DIR/mptcp_bpf_first.o" first
+register_one "$DIR/mptcp_bpf_red.o" red
+register_one "$DIR/mptcp_bpf_rr.o" rr
+register_one "$DIR/mptcp_bpf_minrtt.o" minrtt
+EOF
+chmod 0755 /usr/local/sbin/load-mptcp-bpf-schedulers.sh
+
+cat > /etc/systemd/system/mptcp-bpf-schedulers.service <<'EOF'
+[Unit]
+Description=Load MPTCP BPF schedulers
+After=network-pre.target
+DefaultDependencies=no
+Before=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/load-mptcp-bpf-schedulers.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /usr/local/sbin/omr-mptcp-compat.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONF="/etc/sysctl.d/90-shadowsocks.conf"
+[ -e /proc/sys/net/mptcp/enabled ] || exit 0
+[ -f "$CONF" ] || exit 0
+
+read_key_from_conf() {
+	local key="$1"
+	awk -F= -v k="$key" '
+		$1 ~ "^[[:space:]]*"k"[[:space:]]*$" {
+			val=$2
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+			print val
+		}
+	' "$CONF" | tail -n1
+}
+
+normalize_scheduler() {
+	local s="${1:-}"
+	s="$(echo "$s" | tr -d '[:space:]')"
+	s="${s%.o}"
+	s="${s#mptcp_bpf_}"
+	s="${s#mptcp_}"
+	case "$s" in
+		bkup|burst|first|red|rr|minrtt) echo "bpf_${s}" ;;
+		bpf_*) echo "$s" ;;
+		*) echo "$s" ;;
+	esac
+}
+
+map_pm_type() {
+	case "${1:-0}" in
+		1|userspace|user|netlink) echo "1" ;;
+		*) echo "0" ;;
+	esac
+}
+
+checksum="$(read_key_from_conf net.mptcp.mptcp_checksum)"
+[ -z "$checksum" ] && checksum="$(read_key_from_conf net.mptcp.checksum_enabled)"
+[ -z "$checksum" ] && checksum="$(sysctl -n net.mptcp.checksum_enabled 2>/dev/null || echo 0)"
+
+scheduler="$(read_key_from_conf net.mptcp.mptcp_scheduler)"
+[ -z "$scheduler" ] && scheduler="$(read_key_from_conf net.mptcp.scheduler)"
+[ -z "$scheduler" ] && scheduler="$(sysctl -n net.mptcp.scheduler 2>/dev/null || echo default)"
+scheduler="$(normalize_scheduler "$scheduler")"
+
+pm_type_raw="$(read_key_from_conf net.mptcp.mptcp_path_manager)"
+[ -z "$pm_type_raw" ] && pm_type_raw="$(read_key_from_conf net.mptcp.pm_type)"
+[ -z "$pm_type_raw" ] && pm_type_raw="0"
+pm_type="$(map_pm_type "$pm_type_raw")"
+
+syn_retries="$(read_key_from_conf net.mptcp.mptcp_syn_retries)"
+[ -z "$syn_retries" ] && syn_retries="$(read_key_from_conf net.ipv4.tcp_syn_retries)"
+[ -z "$syn_retries" ] && syn_retries="$(sysctl -n net.ipv4.tcp_syn_retries 2>/dev/null || echo 6)"
+
+cc="$(read_key_from_conf net.ipv4.tcp_congestion_control)"
+[ -z "$cc" ] && cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+
+available="$(sysctl -n net.mptcp.available_schedulers 2>/dev/null || true)"
+if [ -n "$available" ] && ! grep -qw -- "$scheduler" <<<"$available"; then
+	if grep -qw -- "bpf_${scheduler}" <<<"$available"; then
+		scheduler="bpf_${scheduler}"
+	else
+		scheduler="default"
+	fi
+fi
+
+sysctl -qw net.mptcp.enabled=1 || true
+sysctl -qw net.mptcp.checksum_enabled="$checksum" || true
+sysctl -qw net.mptcp.pm_type="$pm_type" || true
+sysctl -qw net.mptcp.scheduler="$scheduler" || true
+
+if [[ "$syn_retries" =~ ^[0-9]+$ ]]; then
+	sysctl -qw net.ipv4.tcp_syn_retries="$syn_retries" || true
+fi
+if [ -n "$cc" ]; then
+	sysctl -qw net.ipv4.tcp_congestion_control="$cc" || true
+fi
+
+logger -t omr-mptcp-compat "applied scheduler=$scheduler pm_type=$pm_type checksum=$checksum cc=$cc"
+EOF
+chmod 0755 /usr/local/sbin/omr-mptcp-compat.sh
+
+cat > /etc/systemd/system/omr-mptcp-compat.service <<'EOF'
+[Unit]
+Description=OMR MPTCP compatibility bridge for modern kernels
+After=network-online.target mptcp-bpf-schedulers.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/omr-mptcp-compat.sh
+EOF
+
+cat > /etc/systemd/system/omr-mptcp-compat.path <<'EOF'
+[Unit]
+Description=Watch OMR sysctl config and apply MPTCP compatibility mapping
+
+[Path]
+PathChanged=/etc/sysctl.d/90-shadowsocks.conf
+PathModified=/etc/sysctl.d/90-shadowsocks.conf
+Unit=omr-mptcp-compat.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/omr-mptcp-compat.timer <<'EOF'
+[Unit]
+Description=Periodic OMR MPTCP compatibility apply
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=omr-mptcp-compat.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable mptcp-bpf-schedulers.service >/dev/null 2>&1 || true
+systemctl enable omr-mptcp-compat.path omr-mptcp-compat.timer >/dev/null 2>&1 || true
+systemctl restart mptcp-bpf-schedulers.service >/dev/null 2>&1 || true
+systemctl restart omr-mptcp-compat.path omr-mptcp-compat.timer >/dev/null 2>&1 || true
+systemctl start omr-mptcp-compat.service >/dev/null 2>&1 || true
+
 # Get shadowsocks optimization
 if [ "$LOCALFILES" = "no" ]; then
 	if [ "$KERNEL" != "5.4" ]; then
