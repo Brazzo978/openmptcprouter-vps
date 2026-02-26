@@ -1038,7 +1038,7 @@ register_one() {
 	if bpftool struct_ops list 2>/dev/null | awk '{print $2}' | grep -qx "$map_name"; then
 		return 0
 	fi
-	bpftool struct_ops register "$obj" "$PIN"
+	bpftool struct_ops register "$obj" "$PIN" >/dev/null 2>&1 || true
 }
 
 register_one "$DIR/mptcp_bpf_bkup.o" bkup
