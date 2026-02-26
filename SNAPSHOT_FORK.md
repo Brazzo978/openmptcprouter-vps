@@ -19,13 +19,15 @@ This snapshot installer defaults to the `Brazzo978` namespace and no longer pull
 - `CHINA=yes` (uses git-based local repo path by default)
 - `LOCALFILES=yes` (uses local templates from cloned `openmptcprouter-vps`)
 - `OMR_GITHUB_ORG=Brazzo978`
-- `OMR_VPS_BRANCH=omr-vps-0.1038-def`
+- `OMR_VPS_BRANCH=omr-vps-0.1048-def`
+- Debian requirement: `Debian 12` or `Debian 13` only
+- On fresh install (`update=0`), Debian 12 is upgraded to Debian 13 automatically
 
 ## Override example
 
 ```bash
 OMR_GITHUB_ORG=MyOrg \
-OMR_VPS_BRANCH=omr-vps-0.1038-def \
+OMR_VPS_BRANCH=omr-vps-0.1048-def \
 OMR_VPS_DEBIAN_BRANCH=main \
 VPSURL=https://raw.githubusercontent.com/MyOrg/openmptcprouter-vps-artifacts/main/ \
 ./debian12-x86_64.sh

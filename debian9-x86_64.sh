@@ -106,7 +106,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1038-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1048-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -157,16 +157,12 @@ if test -f /etc/os-release ; then
 else
 	. /usr/lib/os-release
 fi
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" != "9" ] && [ "$VERSION_ID" != "10" ] && [ "$VERSION_ID" != "11" ] && [ "$VERSION_ID" != "12" ] && [ "$VERSION_ID" != "13" ]; then
-	echo "This script only work with Debian Stretch (9.x), Debian Buster (10.x), Debian Bullseye (11.x), Debian Bookworm (12.x) or Debian Trixie (13.x)"
+if [ "$ID" != "debian" ]; then
+	echo "This installer supports only Debian 12 or Debian 13."
 	exit 1
-elif [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "18.04" ] && [ "$VERSION_ID" != "19.04" ] && [ "$VERSION_ID" != "20.04" ] && [ "$VERSION_ID" != "22.04" ]; then
-	echo "This script only work with Ubuntu 18.04, 19.04, 20.04 or 22.04"
-	echo "Use debian when possible"
-	exit 1
-elif [ "$ID" != "debian" ] && [ "$ID" != "ubuntu" ]; then
-	echo "This script only work with Ubuntu 18.04, Ubuntu 19.04, Ubutun 20.04, Ubuntu 22.04, Debian Stretch (9.x), Debian Buster (10.x), Debian Bullseye (11.x) or Debian Bookworm (12.x)"
-	echo "Use Debian when possible"
+fi
+if [ "$VERSION_ID" != "12" ] && [ "$VERSION_ID" != "13" ]; then
+	echo "This installer requires Debian 12 (Bookworm) or Debian 13 (Trixie)."
 	exit 1
 fi
 
@@ -258,55 +254,15 @@ rm -f /etc/apt/sources.list.d/stretch-backports.list
 [ ! -f /etc/apt/sources.list ] && touch /etc/apt/sources.list
 sed -i '/buster-backports/d' /etc/apt/sources.list
 sed -i '/stretch-backports/d' /etc/apt/sources.list
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ]; then
-	apt-get update
-else
-	apt-get update --allow-releaseinfo-change
-fi
+apt-get update --allow-releaseinfo-change
 rm -f /var/lib/dpkg/lock
 rm -f /var/lib/dpkg/lock-frontend
 rm -f /var/cache/apt/archives/lock
 echo "Install apt-transport-https, gnupg and openssh-server..."
 apt-get -y install apt-transport-https gnupg openssh-server libcrypt1 zstd
 
-#if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_DEBIAN" = "yes" ] && [ "$update" = "0" ]; then
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "9" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Debian 9 Stretch to Debian 10 Buster"
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	sed -i 's:stretch:buster:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	VERSION_ID="10"
-fi
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "10" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Debian 10 Buster to Debian 11 Bullseye"
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	sed -i 's:buster:bullseye:g' /etc/apt/sources.list
-	sed -i 's:archive:deb:g' /etc/apt/sources.list
-	sed -i 's:bullseye/updates:bullseye-security:g' /etc/apt/sources.list
-	sed -i 's:openmptcprouter:d' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	VERSION_ID="11"
-fi
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "11" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Debian 11 Bullseye to Debian 12 Bookworm"
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	sed -i 's:archive:deb:g' /etc/apt/sources.list
-	sed -i 's:bullseye:bookworm:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
-	VERSION_ID="12"
-fi
-
-# Update to Debian 13 only if FORCE_UPDATE_OS is set to yes. No problem to use Debian 12 if not.
-if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "12" ] && [ "$UPDATE_OS" = "yes" ]; then
+# Upgrade base install from Debian 12 to Debian 13.
+if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "12" ] && [ "$update" = "0" ]; then
 	echo "Update Debian 12 Bookworm to Debian 13 Trixie"
 	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
 	apt-get -y -f --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
@@ -322,26 +278,6 @@ if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "12" ] && [ "$UPDATE_OS" = "yes" ];
 	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades upgrade
 	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" --allow-downgrades dist-upgrade
 	VERSION_ID="13"
-fi
-if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Ubuntu 18.04 to Ubuntu 20.04"
-	apt-get -y -f --force-yes --allow-downgrades upgrade
-	apt-get -y -f --force-yes --allow-downgrades dist-upgrade
-	sed -i 's:bionic:focal:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="20.04"
-fi
-if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "18.04" ] && [ "$UPDATE_OS" = "yes" ]; then
-	echo "Update Ubuntu 20.04 to Ubuntu 22.04"
-	apt-get -y -f --force-yes --allow-downgrades upgrade
-	apt-get -y -f --force-yes --allow-downgrades dist-upgrade
-	sed -i 's:focal:jammy:g' /etc/apt/sources.list
-	apt-get update --allow-releaseinfo-change
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" upgrade
-	apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade
-	VERSION_ID="22.04"
 fi
 
 # Add OpenMPTCProuter repo
