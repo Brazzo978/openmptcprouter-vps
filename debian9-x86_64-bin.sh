@@ -23,16 +23,19 @@ fi
 apt-get update
 apt-get -y install apt-transport-https
 
-echo 'deb https://repo.openmptcprouter.com stretch main' > /etc/apt/sources.list.d/openmptcprouter.list
+REPO_DOMAIN=${REPO_DOMAIN:-repoomr.3klab.com}
+REPO_KEY_URL=${REPO_KEY_URL:-https://${REPO_DOMAIN}/openmptcprouter.gpg.key}
+
+echo "deb https://${REPO_DOMAIN} stretch main" > /etc/apt/sources.list.d/openmptcprouter.list
 cat <<EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
 Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
 Package: *
-Pin: origin repo.openmptcprouter.com
+Pin: origin ${REPO_DOMAIN}
 Pin-Priority: 1001
 EOF
 
 echo 'deb http://deb.debian.org/debian stretch-backports main' > /etc/apt/sources.list.d/stretch-backports.list
-wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
+wget -O - "${REPO_KEY_URL}" | apt-key add -
 apt-get update
 apt-get -y install dirmngr patch rename curl
 # Rename bzImage to vmlinuz, needed when custom kernel was used

@@ -1,6 +1,6 @@
 # OpenMPTCProuter VPS scripts (omr-vps-0.1048-def)
 
-This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
+This is the VPS part of OpenMPTCProuter, with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
 
 ## Requirements
 
