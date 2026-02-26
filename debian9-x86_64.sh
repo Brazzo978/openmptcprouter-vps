@@ -380,9 +380,9 @@ echo "Install mptcp kernel and shadowsocks..."
 apt-get update --allow-releaseinfo-change
 sleep 2
 if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "13" ]; then
-	apt-get -y install dirmngr patch rename curl unzip pkg-config ipset
+	apt-get -y install dirmngr patch rename curl unzip pkg-config ipset bpftool
 else
-	apt-get -y install dirmngr patch rename curl libcurl4 unzip pkg-config ipset
+	apt-get -y install dirmngr patch rename curl libcurl4 unzip pkg-config ipset bpftool
 fi
 
 if [ -z "$(dpkg-query -l | grep grub)" ]; then
@@ -1250,7 +1250,7 @@ if [ "$SHADOWSOCKS" = "yes" ]; then
 		fi
 		SHADOWSOCKS_PASS_JSON=$(echo $SHADOWSOCKS_PASS | sed 's/+/-/g; s/\//_/g;')
 		if [ "$NBCPU" -gt "1" ]; then
-			for i in $(seq 2 NBCPU); do
+			for i in $(seq 2 $NBCPU); do
 				sed -i '0,/65101/ s/        "65101.*/&\n&/' /etc/shadowsocks-libev/manager.json
 			done
 		fi
