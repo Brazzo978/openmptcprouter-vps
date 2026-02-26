@@ -1958,6 +1958,16 @@ if [ "$OPENVPN" = "yes" ]; then
 fi
 
 echo 'Glorytun UDP'
+# Avoid package postinst hangs when TUN is unavailable on the VPS.
+if [ "$GLORYTUN_UDP" = "yes" ] || [ "$GLORYTUN_TCP" = "yes" ]; then
+	if ! ip tuntap add dev omr-tun-test mode tun >/dev/null 2>&1; then
+		echo "No working /dev/net/tun on this host: disable Glorytun UDP/TCP."
+		GLORYTUN_UDP="no"
+		GLORYTUN_TCP="no"
+	else
+		ip link del omr-tun-test >/dev/null 2>&1 || true
+	fi
+fi
 # Install Glorytun UDP
 if systemctl -q is-active glorytun-udp@tun0.service 2>/dev/null; then
 	systemctl -q stop 'glorytun-udp@*' > /dev/null 2>&1
