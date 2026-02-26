@@ -2563,7 +2563,7 @@ if [ "$update" = "0" ]; then
 		Your OpenMPTCProuter Server username: openmptcprouter
 		EOF
 	fi
-	#systemctl -q restart sshd
+		systemctl -q restart ssh >/dev/null 2>&1 || systemctl -q restart sshd >/dev/null 2>&1 || true
 else
 	echo '===================================================================================='
 	echo "OpenMPTCProuter Server is now updated to version $OMR_VERSION !"
@@ -2675,8 +2675,9 @@ else
 	echo 'Restarting shorewall...'
 	[ -n "$INTERFACE" ] && systemctl -q restart shorewall >/dev/null 2>&1 || true
 	[ -n "$INTERFACE6" ] && systemctl -q restart shorewall6 >/dev/null 2>&1 || true
-	echo 'done'
-	echo '===================================================================================='
+		echo 'done'
+		systemctl -q restart ssh >/dev/null 2>&1 || systemctl -q restart sshd >/dev/null 2>&1 || true
+		echo '===================================================================================='
 	echo '\033[1m  /!\ You need to reboot to use latest MPTCP kernel /!\ \033[0m'
 	echo '===================================================================================='
 fi
