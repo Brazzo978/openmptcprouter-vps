@@ -1,28 +1,55 @@
-# OpenMPTCProuter VPS scripts
+# OpenMPTCProuter VPS scripts (omr-vps-0.1048-def)
 
-All scripts needed to install OpenMPTCProuter VPS.
+This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
 
-This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), a solution to aggregate multiple internet connections.
- 
-* ```debian9-x86_64.sh```: The main script install ShadowSocks, Glorytun TCP, Glorytun UDP, Shorewall, the MPTCP kernel and can install OpenVPN
-* ```debian9-x86_64-mlvpn.sh```: Script to install MLVPN
-* ```config.json```: shadowsocks config
-* ```/shorewall4```: shorewall default configuration
-* ```/shorewall6```: shorewall6 default configuration
-* ```glorytun-tcp-run```: script to run glorytun with configuration parameters
-* ```glorytun-tcp@.service.in```: glorytun systemd service
-* ```glorytun.network```: glorytun systemd network (for DHCP)
-* ```glorytun-udp-run```: script to run glorytun UDP with configuration parameters
-* ```glorytun-udp.network```: glorytun UDP systemd network (for DHCP)
-* ```glorytun-udp@.service.in```: glorytun UDP systemd service
-* ```mlvpn.network```: MLVPN systemd network (for DHCP)
-* ```mlvpn0.conf```: MLVPN default config
-* ```omr-6in4-service```: Script used to make 6in4 tunnel always up and detect ip used by OpenMPTCProuter to config Shorewall
-* ```omr-6in4.service.in```: Systemd service to run the script
-* ```openvpn-tun0.cnf```: OpenVPN default config
-* ```openvpn.network```: OpenVPN systemd network (for DHCP)
-* ```shadowsocks.conf```: shadowsocks sysctl.d optimization and mptcp config
-* ```tun0.glorytun```: glorytun default configuration
-* ```tun0.glorytun-udp```: glorytun default configuration
-* ```update-grub.sh```: Script used to check if MPTCP kernel is the default
+## Requirements
 
+- Debian 12 or Debian 13
+- Root shell
+- Public IPv4 VPS
+
+Note: on fresh install (`update=0`), Debian 12 is auto-upgraded to Debian 13 by the installer policy.
+
+## Quick install (new VPS)
+
+```bash
+apt-get update
+apt-get install -y curl ca-certificates
+
+curl -fsSL \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
+  -o /root/debian9-x86_64.sh
+chmod +x /root/debian9-x86_64.sh
+
+# set your domain/FQDN used by OMR
+VPS_DOMAIN=vps.example.com KERNEL=6.12 /root/debian9-x86_64.sh
+```
+
+## Update an existing VPS
+
+```bash
+cd /root
+rm -f /root/debian9-x86_64.sh
+curl -fsSL \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
+  -o /root/debian9-x86_64.sh
+chmod +x /root/debian9-x86_64.sh
+
+update=1 KERNEL=6.12 /root/debian9-x86_64.sh
+```
+
+## What this branch adds
+
+- Uses your fork namespace (`Brazzo978`) by default.
+- Uses `repoomr.3klab.com` for packages/artifacts.
+- Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`).
+- Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler`.
+
+## Post-install checks
+
+```bash
+uname -r
+cat /proc/sys/net/mptcp/available_schedulers
+cat /proc/sys/net/ipv4/tcp_congestion_control
+systemctl --no-pager --full status mptcp-bpf-schedulers.service omr-mptcp-compat.timer
+```
