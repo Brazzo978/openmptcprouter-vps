@@ -1,11 +1,13 @@
 #!/bin/sh
+OMR_INSTALLER="/usr/share/omr-server/debian9-x86_64.sh"
+
 if [ -f /etc/openmptcprouter-vps-admin/update ]; then
-        wget -O - http://www.openmptcprouter.com/server/debian.sh | sh
+        LOCALFILES=yes REINSTALL=no UPDATE=yes FORCE_UPDATE_OS=no /bin/sh "$OMR_INSTALLER"
         rm -f /etc/openmptcprouter-vps-admin/update
         reboot
 fi
 if [ -f /etc/openmptcprouter-vps-admin/update-bin ]; then
-        LOCALFILES=yes SOURCES=yes REINSTALL=no /usr/share/omr-server/debian9-x86_64.sh
+        LOCALFILES=yes SOURCES=yes REINSTALL=no UPDATE=yes FORCE_UPDATE_OS=no /bin/sh "$OMR_INSTALLER"
         rm -f /etc/openmptcprouter-vps-admin/update-bin
         #reboot
 fi
