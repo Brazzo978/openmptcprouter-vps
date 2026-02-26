@@ -233,12 +233,13 @@ fi
 [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
 	echo "Update ${REPO} key"
 	apt-key del '2FDF 70C8 228B 7F04 42FE  59F6 608F D17B 2B24 D936' >/dev/null 2>&1 || true
-	if [ "$CHINA" = "yes" ]; then
-		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-		wget ${OMR_VPS_DEBIAN_GPG_URL} -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
-	else
-		#wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-		wget https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+	rm -f /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+	if [ "$CHINA" != "yes" ]; then
+		if command -v gpg >/dev/null 2>&1; then
+			wget -q -O - https://${REPO}/openmptcprouter.gpg.key | gpg --dearmor -o /usr/share/keyrings/openmptcprouter-archive-keyring.gpg
+		else
+			wget -q https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+		fi
 	fi
 }
 
@@ -309,7 +310,7 @@ if [ "$CHINA" = "yes" ]; then
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
 else
-	echo "deb [arch=amd64] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
+	echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openmptcprouter-archive-keyring.gpg] https://${REPO} buster main" > /etc/apt/sources.list.d/openmptcprouter.list
 	if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "13" ]; then
 		cat <<-EOF | tee /etc/apt/preferences.d/openmptcprouter.pref
 			Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
@@ -328,7 +329,7 @@ else
 		EOF
 	fi
 	if [ -n "$(echo $OMR_VERSION | grep test)" ] || [ -n "$(echo $OMR_VERSION | grep rolling)" ]; then
-		echo "deb [arch=amd64] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
+		echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openmptcprouter-archive-keyring.gpg] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
 #		cat <<-EOF | tee -a /etc/apt/preferences.d/openmptcprouter.pref
 #			Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
 #			Package: *
@@ -346,8 +347,11 @@ else
 			Pin-Priority: 1003
 		EOF
 	fi
-	#wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
-	wget https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+	if command -v gpg >/dev/null 2>&1; then
+		wget -q -O - https://${REPO}/openmptcprouter.gpg.key | gpg --dearmor -o /usr/share/keyrings/openmptcprouter-archive-keyring.gpg
+	else
+		wget -q https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+	fi
 fi
 
 #apt-key adv --keyserver hkp://keys.gnupg.net --recv-keys 379CE192D401AB61
