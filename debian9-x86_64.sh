@@ -110,7 +110,7 @@ OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1048-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
-OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian/main/openmptcprouter.gpg.key}
+OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://repoomr.3klab.com/openmptcprouter.gpg.key}
 OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
 OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-${OMR_VPS_ADMIN_GIT_URL%*.git}/archive/${OMR_ADMIN_VERSION}.zip}
 MPTCPIZE_GIT_URL=${MPTCPIZE_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mptcpize.git}
@@ -127,8 +127,8 @@ case "$VPSPATH" in
 	*) VPSPATH="/$VPSPATH" ;;
 esac
 VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}' | tr -d "\n")}
-VPSURL=${VPSURL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-artifacts/main/}
-REPO=${REPO:-repo.omr.local}
+VPSURL=${VPSURL:-https://repoomr.3klab.com/}
+REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
 OMR_VERSION="0.1048-rolling-test"

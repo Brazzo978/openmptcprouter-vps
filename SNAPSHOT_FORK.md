@@ -20,6 +20,8 @@ This snapshot installer defaults to the `Brazzo978` namespace and no longer pull
 - `LOCALFILES=yes` (uses local templates from cloned `openmptcprouter-vps`)
 - `OMR_GITHUB_ORG=Brazzo978`
 - `OMR_VPS_BRANCH=omr-vps-0.1048-def`
+- `REPO=repoomr.3klab.com`
+- `VPSURL=https://repoomr.3klab.com/`
 - Debian requirement: `Debian 12` or `Debian 13` only
 - On fresh install (`update=0`), Debian 12 is upgraded to Debian 13 automatically
 
