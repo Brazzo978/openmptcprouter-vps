@@ -131,7 +131,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1048-rolling-test"
+OMR_VERSION="0.1048-3KTest"
 
 DIR=$( pwd )
 #"
@@ -330,7 +330,7 @@ else
 			
 		EOF
 	fi
-	if [ -n "$(echo $OMR_VERSION | grep test)" ] || [ -n "$(echo $OMR_VERSION | grep rolling)" ]; then
+	if echo "$OMR_VERSION" | grep -Eiq 'test|rolling'; then
 		echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openmptcprouter-archive-keyring.gpg] https://${REPO} next main" > /etc/apt/sources.list.d/openmptcprouter-test.list
 #		cat <<-EOF | tee -a /etc/apt/preferences.d/openmptcprouter.pref
 #			Explanation: Prefer OpenMPTCProuter provided packages over the Debian native ones
