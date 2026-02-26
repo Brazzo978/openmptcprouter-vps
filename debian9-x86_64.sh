@@ -536,6 +536,15 @@ elif [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
 	dpkg --force-all -i -B /tmp/${OMR_LIBC_DEB} >/dev/null 2>&1 || true
 	dpkg --force-all -i -B /tmp/${OMR_HEADERS_DEB}
 	dpkg --force-all -i -B /tmp/${OMR_IMAGE_DEB}
+	# Some VPS providers ignore guest GRUB defaults and boot the highest distro kernel.
+	# Keep OMR as preferred boot target by purging newer stock Debian kernels.
+	for pkg in $(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | grep -E 'linux-image-[0-9]+\.[0-9]+\.[0-9]+\+deb' || true); do
+		PKGREL=$(echo "$pkg" | sed -e 's/^linux-image-//' -e 's/+.*$//')
+		if dpkg --compare-versions "$PKGREL" gt "$KERNEL_VERSION"; then
+			apt-get -y purge "$pkg" >/dev/null 2>&1 || true
+		fi
+	done
+	apt-get -y purge linux-image-amd64 linux-headers-amd64 linux-image-cloud-amd64 linux-headers-cloud-amd64 >/dev/null 2>&1 || true
 
 #	wget -qO - https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -vo /usr/share/keyrings/xanmod-archive-keyring.gpg
 #	echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | tee /etc/apt/sources.list.d/xanmod-release.list
