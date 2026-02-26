@@ -1,7 +1,7 @@
 Source: omr-server
 Section: net
 Priority: optional
-Maintainer: OpenMPTCProuter <contact@openmptcprouter.com>
+Maintainer: Brazzo978 <Brazzo978@users.noreply.github.com>
 Build-Depends: debhelper (>= 10)
 X-Python-Version: >= 3.2
 Standards-Version: 0.0.1
