@@ -1959,13 +1959,27 @@ fi
 
 echo 'Glorytun UDP'
 # Avoid package postinst hangs when TUN is unavailable on the VPS.
+_check_tun_ready() {
+	mkdir -p /dev/net >/dev/null 2>&1 || true
+	[ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200 >/dev/null 2>&1 || true
+	chmod 666 /dev/net/tun >/dev/null 2>&1 || true
+	modprobe tun >/dev/null 2>&1 || true
+	i=0
+	while [ "$i" -lt 10 ]; do
+		if ip tuntap add dev omr-tun-test mode tun >/dev/null 2>&1; then
+			ip link del omr-tun-test >/dev/null 2>&1 || true
+			return 0
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
 if [ "$GLORYTUN_UDP" = "yes" ] || [ "$GLORYTUN_TCP" = "yes" ]; then
-	if ! ip tuntap add dev omr-tun-test mode tun >/dev/null 2>&1; then
-		echo "No working /dev/net/tun on this host: disable Glorytun UDP/TCP."
+	if ! _check_tun_ready; then
+		echo "No working /dev/net/tun after retries: disable Glorytun UDP/TCP."
 		GLORYTUN_UDP="no"
 		GLORYTUN_TCP="no"
-	else
-		ip link del omr-tun-test >/dev/null 2>&1 || true
 	fi
 fi
 # Install Glorytun UDP
