@@ -516,17 +516,18 @@ elif [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
 		PSABI="x64v3"
 	fi
 	KERNEL_VERSION="6.12.67"
-	KERNEL_REV="0~20260123.ga077982"
-	if [ "$CHINA" = "yes" ]; then
-		wget -O /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-		wget -O /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-	else
-		wget -O /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb ${VPSURL}kernel/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-		wget -O /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb ${VPSURL}kernel/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-	fi
-	echo "Install kernel linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1 source release"
-	dpkg --force-all -i -B /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-	dpkg --force-all -i -B /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
+	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-7}"
+	OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-omr-3ktest-xanmod1}"
+	OMR_IMAGE_DEB="linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+	OMR_HEADERS_DEB="linux-headers-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+	OMR_LIBC_DEB="linux-libc-dev_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+	wget -O /tmp/${OMR_IMAGE_DEB} ${VPSURL}kernel/${OMR_IMAGE_DEB}
+	wget -O /tmp/${OMR_HEADERS_DEB} ${VPSURL}kernel/${OMR_HEADERS_DEB}
+	wget -O /tmp/${OMR_LIBC_DEB} ${VPSURL}kernel/${OMR_LIBC_DEB} || true
+	echo "Install OMR kernel linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
+	dpkg --force-all -i -B /tmp/${OMR_LIBC_DEB} >/dev/null 2>&1 || true
+	dpkg --force-all -i -B /tmp/${OMR_HEADERS_DEB}
+	dpkg --force-all -i -B /tmp/${OMR_IMAGE_DEB}
 
 #	wget -qO - https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -vo /usr/share/keyrings/xanmod-archive-keyring.gpg
 #	echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | tee /etc/apt/sources.list.d/xanmod-release.list
