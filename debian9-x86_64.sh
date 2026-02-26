@@ -56,7 +56,7 @@ LANROUTES=${LANROUTES:-yes}
 REINSTALL=${REINSTALL:-yes}
 SPEEDTEST=${SPEEDTEST:-yes}
 IPERF=${IPERF:-yes}
-LOCALFILES=${LOCALFILES:-no}
+LOCALFILES=${LOCALFILES:-yes}
 INTERFACE=${INTERFACE:-$(ip -o -4 route show to default | grep -m 1 -Po '(?<=dev )(\S+)' | tr -d "\n")}
 INTERFACE6=${INTERFACE6:-$(ip -o -6 route show to default | grep -m 1 -Po '(?<=dev )(\S+)' | tr -d "\n")}
 [ -z "$INTERFACE6" ] && INTERFACE6="$INTERFACE"
@@ -103,12 +103,33 @@ IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 SHADOWSOCKS_GO_VERSION="1.14.0"
 DEFAULT_USER="openmptcprouter"
-VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
-VPSPATH="server-test"
-VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com)}
-VPSURL="https://www.openmptcprouter.com/"
-REPO="repo.openmptcprouter.com"
-CHINA=${CHINA:-no}
+
+# Fork snapshot defaults (independent from upstream Ysurac infrastructure)
+OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1038-def}
+OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
+OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
+OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
+OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian/main/openmptcprouter.gpg.key}
+OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
+OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-${OMR_VPS_ADMIN_GIT_URL%*.git}/archive/${OMR_ADMIN_VERSION}.zip}
+MPTCPIZE_GIT_URL=${MPTCPIZE_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mptcpize.git}
+SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
+GLORYTUN_GIT_URL=${GLORYTUN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/glorytun.git}
+DSVPN_GIT_URL=${DSVPN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/dsvpn.git}
+OMR_FEEDS_BASE_URL=${OMR_FEEDS_BASE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-feeds/develop}
+VPS_CONFIG_URL=${VPS_CONFIG_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}}
+
+VPS_DOMAIN=${VPS_DOMAIN:-$(hostname -f 2>/dev/null || hostname)}
+VPSPATH=${VPSPATH:-}
+case "$VPSPATH" in
+	""|/*) ;;
+	*) VPSPATH="/$VPSPATH" ;;
+esac
+VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}' | tr -d "\n")}
+VPSURL=${VPSURL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-artifacts/main/}
+REPO=${REPO:-repo.omr.local}
+CHINA=${CHINA:-yes}
 
 OMR_VERSION="0.1048-rolling-test"
 
@@ -218,7 +239,7 @@ fi
 	apt-key del '2FDF 70C8 228B 7F04 42FE  59F6 608F D17B 2B24 D936' >/dev/null 2>&1 || true
 	if [ "$CHINA" = "yes" ]; then
 		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-		wget https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
+		wget ${OMR_VPS_DEBIAN_GPG_URL} -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
 	else
 		#wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
 		wget https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
@@ -331,29 +352,21 @@ if [ "$CHINA" = "yes" ]; then
 	rm -rf /var/lib/openmptcprouter-vps-debian 
 	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
 		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
+		git clone ${OMR_VPS_DEBIAN_GIT_URL} /var/lib/openmptcprouter-vps-debian
 	fi
 	cd /var/lib/openmptcprouter-vps-debian
 	git pull
-#	if [ "$VPSPATH" = "server-test" ]; then
-#		git checkout develop
-#	else
-#		git checkout main
-#	fi
+	git checkout "${OMR_VPS_DEBIAN_BRANCH}" >/dev/null 2>&1 || true
 	echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
 	cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
 	rm -rf /usr/share/omr-server-git
 	if [ ! -d /usr/share/omr-server-git ]; then
 		#git clone https://gitee.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
+		git clone ${OMR_VPS_GIT_URL} /usr/share/omr-server-git
 	fi
 	cd /usr/share/omr-server-git
 	git pull
-	if [ "$VPSPATH" = "server-test" ]; then
-		git checkout develop
-	else
-		git checkout master
-	fi
+	git checkout "${OMR_VPS_BRANCH}" >/dev/null 2>&1 || git checkout master >/dev/null 2>&1 || true
 	LOCALFILES="yes"
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
@@ -481,7 +494,7 @@ if [ "$KERNEL" = "5.4" ] || [ "$KERNEL" = "5.15" ]; then
 	# Check if mptcp kernel is grub default kernel
 	echo "Set MPTCP kernel as grub default..."
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /tmp/update-grub.sh ${VPSURL}${VPSPATH}/update-grub.sh
+		wget -O /tmp/update-grub.sh ${VPS_CONFIG_URL}${VPSPATH}/update-grub.sh
 		cd /tmp
 	else
 		cd ${DIR}
@@ -661,7 +674,7 @@ if [ "$IPERF" = "yes" ] && [ "$CHINA" != "yes" ]; then
 		wget https://github.com/esnet/iperf/releases/download/3.18/iperf-3.18.tar.gz
 		tar xzf iperf-3.18.tar.gz
 		cd iperf-3.18
-		wget --waitretry=1 --read-timeout=20 --timeout=15 -t 5 --continue --no-dns-cache https://www.openmptcprouter.com/debian/iperf3_3.18-2.debian.tar.xz
+		wget --waitretry=1 --read-timeout=20 --timeout=15 -t 5 --continue --no-dns-cache ${VPSURL}debian/iperf3_3.18-2.debian.tar.xz
 		tar xJf iperf3_3.18-2.debian.tar.xz
 		sleep 1
 		echo "Install iperf3 dependencies..."
@@ -693,7 +706,7 @@ if [ "$IPERF" = "yes" ] && [ "$CHINA" != "yes" ]; then
 	systemctl enable iperf3.service || true
 	mkdir -p /etc/systemd/system/iperf3.service.d
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/systemd/system/iperf3.service.d/override.conf ${VPSURL}${VPSPATH}/iperf3.override.conf
+		wget -O /etc/systemd/system/iperf3.service.d/override.conf ${VPS_CONFIG_URL}${VPSPATH}/iperf3.override.conf
 	else
 		cp ${DIR}/iperf3.override.conf /etc/systemd/system/iperf3.service.d/override.conf
 	fi
@@ -711,7 +724,7 @@ if [ "$KERNEL" != "5.4" ]; then
 		apt-get -y install --no-install-recommends build-essential
 		cd /tmp
 		apt-get -y install git
-		git clone https://github.com/Ysurac/mptcpize.git
+		git clone ${MPTCPIZE_GIT_URL}
 		cd mptcpize
 		make
 		make install
@@ -744,7 +757,7 @@ if [ "$KERNEL" != "5.4" ]; then
 	#	apt-get -y install $(dpkg --get-selections | grep linux-image-6.1 | grep -v dbg | cut -f1)-dbg
 	#	apt-get -y install systemtap
 	#	mkdir -p /usr/share/systemtap-mptcp
-	#	wget -O /usr/share/systemtap-mptcp/mptcp-app.stap ${VPSURL}${VPSPATH}/mptcp-app.stap
+	#	wget -O /usr/share/systemtap-mptcp/mptcp-app.stap ${VPS_CONFIG_URL}${VPSPATH}/mptcp-app.stap
 	#fi
 fi
 
@@ -760,7 +773,7 @@ if [ "$SHADOWSOCKS" = "yes" ]; then
 		#wget -O /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz http://github.com/shadowsocks/shadowsocks-libev/releases/download/v${SHADOWSOCKS_VERSION}/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz
 		cd /tmp
 		rm -rf shadowsocks-libev
-		git clone https://github.com/Ysurac/shadowsocks-libev.git
+		git clone ${SHADOWSOCKS_GIT_URL}
 		cd shadowsocks-libev
 		git checkout ${SHADOWSOCKS_VERSION}
 		git submodule update --init --recursive
@@ -979,12 +992,12 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	mkdir -p /var/opt/openmptcprouter
 	if [ "$SOURCES" = "yes" ]; then
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /lib/systemd/system/omr-admin.service ${VPSURL}${VPSPATH}/omr-admin.service.in
-			#wget -O /lib/systemd/system/omr-admin-ipv6.service ${VPSURL}${VPSPATH}/omr-admin-ipv6.service.in
+			wget -O /lib/systemd/system/omr-admin.service ${VPS_CONFIG_URL}${VPSPATH}/omr-admin.service.in
+			#wget -O /lib/systemd/system/omr-admin-ipv6.service ${VPS_CONFIG_URL}${VPSPATH}/omr-admin-ipv6.service.in
 		else
 			cp ${DIR}/omr-admin.service.in /lib/systemd/system/omr-admin.service
 		fi
-		wget -O /tmp/openmptcprouter-vps-admin.zip https://github.com/Ysurac/openmptcprouter-vps-admin/archive/${OMR_ADMIN_VERSION}.zip
+		wget -O /tmp/openmptcprouter-vps-admin.zip ${OMR_ADMIN_ARCHIVE_URL}
 		cd /tmp
 		unzip -q -o openmptcprouter-vps-admin.zip
 		cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
@@ -1066,9 +1079,9 @@ fi
 # Get shadowsocks optimization
 if [ "$LOCALFILES" = "no" ]; then
 	if [ "$KERNEL" != "5.4" ]; then
-		wget -O /etc/sysctl.d/90-shadowsocks.conf ${VPSURL}${VPSPATH}/shadowsocks.6.1.conf
+		wget -O /etc/sysctl.d/90-shadowsocks.conf ${VPS_CONFIG_URL}${VPSPATH}/shadowsocks.6.1.conf
 	else
-		wget -O /etc/sysctl.d/90-shadowsocks.conf ${VPSURL}${VPSPATH}/shadowsocks.conf
+		wget -O /etc/sysctl.d/90-shadowsocks.conf ${VPS_CONFIG_URL}${VPSPATH}/shadowsocks.conf
 	fi
 else
 	if [ "$KERNEL" != "5.4" ]; then
@@ -1090,7 +1103,7 @@ if [ "$SHADOWSOCKS" = "yes" ]; then
 	if [ "$update" = "0" ] || [ ! -f /etc/shadowsocks-libev/manager.json ]; then
 		mkdir -p /etc/shadowsocks-libev
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/shadowsocks-libev/manager.json ${VPSURL}${VPSPATH}/manager.json
+			wget -O /etc/shadowsocks-libev/manager.json ${VPS_CONFIG_URL}${VPSPATH}/manager.json
 		else
 			cp ${DIR}/manager.json /etc/shadowsocks-libev/manager.json
 		fi
@@ -1113,7 +1126,7 @@ if [ "$SHADOWSOCKS" = "yes" ]; then
 	#sed -i 's:aes-256-cfb:chacha20:g' /etc/shadowsocks-libev/config.json
 	#sed -i 's:json:json --no-delay:g' /lib/systemd/system/shadowsocks-libev-server@.service
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /lib/systemd/system/shadowsocks-libev-manager@.service ${VPSURL}${VPSPATH}/shadowsocks-libev-manager@.service.in
+		wget -O /lib/systemd/system/shadowsocks-libev-manager@.service ${VPS_CONFIG_URL}${VPSPATH}/shadowsocks-libev-manager@.service.in
 	else
 		cp ${DIR}/shadowsocks-libev-manager@.service.in /lib/systemd/system/shadowsocks-libev-manager@.service
 	fi
@@ -1136,8 +1149,8 @@ if ! grep -q 'DefaultLimitNOFILE=65536' /etc/systemd/system.conf ; then
 fi
 
 if [ "$LOCALFILES" = "no" ]; then
-	wget -O /lib/systemd/system/omr-update.service ${VPSURL}${VPSPATH}/omr-update.service.in
-	wget -O /usr/bin/omr-update ${VPSURL}${VPSPATH}/omr-update
+	wget -O /lib/systemd/system/omr-update.service ${VPS_CONFIG_URL}${VPSPATH}/omr-update.service.in
+	wget -O /usr/bin/omr-update ${VPS_CONFIG_URL}${VPSPATH}/omr-update
 	chmod 755 /usr/bin/omr-update
 else
 	cp ${DIR}/omr-update.service.in /lib/systemd/system/omr-update.service
@@ -1184,7 +1197,7 @@ if [ "$V2RAY_PLUGIN" = "yes" ]; then
 	if [ "$SOURCES" = "yes" ] && [ "$ARCH" != "amd64" ]; then
 		rm -rf /tmp/v2ray-plugin-linux-amd64-${V2RAY_PLUGIN_VERSION}.tar.gz
 		#wget -O /tmp/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz https://github.com/shadowsocks/v2ray-plugin/releases/download/${V2RAY_PLUGIN_VERSION}/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz
-		#wget -O /tmp/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz ${VPSURL}${VPSPATH}/bin/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz
+		#wget -O /tmp/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz ${VPS_CONFIG_URL}${VPSPATH}/bin/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz
 		wget -O /tmp/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz https://github.com/teddysun/v2ray-plugin/releases/download/v${V2RAY_PLUGIN_VERSION}/v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz
 		cd /tmp
 		tar xzvf v2ray-plugin-linux-amd64-v${V2RAY_PLUGIN_VERSION}.tar.gz
@@ -1247,7 +1260,7 @@ if [ "$SHADOWSOCKS_GO" = "yes" ]; then
 		[ -n "$UPSK2" ] && [ "$UPSK2" != "UPSK" ] && [ "$UPSK2" != "null" ] && UPSK="$UPSK2"
 	fi
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/shadowsocks-go/server.json ${VPSURL}${VPSPATH}/shadowsocks-go.server.json
+		wget -O /etc/shadowsocks-go/server.json ${VPS_CONFIG_URL}${VPSPATH}/shadowsocks-go.server.json
 	else
 		cp ${DIR}/shadowsocks-go.server.json /etc/shadowsocks-go/server.json
 	fi
@@ -1303,7 +1316,7 @@ if [ "$V2RAY" = "yes" ]; then
 #			cp v2ray /usr/bin/
 #			cp geoip.dat /usr/bin/
 #			cp geosite.dat /usr/bin/
-#			wget -O /lib/systemd/system/v2ray.service ${VPSURL}${VPSPATH}/v2ray.service
+#			wget -O /lib/systemd/system/v2ray.service ${VPS_CONFIG_URL}${VPSPATH}/v2ray.service
 #		fi
 	else
 		apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}
@@ -1314,7 +1327,7 @@ if [ "$V2RAY" = "yes" ]; then
 	fi
 	#if [ ! -f /etc/v2ray/v2ray-server.json ]; then
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/v2ray/v2ray-server.json ${VPSURL}${VPSPATH}/v2ray-server.json
+			wget -O /etc/v2ray/v2ray-server.json ${VPS_CONFIG_URL}${VPSPATH}/v2ray-server.json
 		else
 			cp ${DIR}/v2ray-server.json /etc/v2ray/v2ray-server.json
 		fi
@@ -1329,7 +1342,7 @@ if [ "$V2RAY" = "yes" ]; then
 	#	mv -f /etc/systemd/system/v2ray.service.dpkg-dist /etc/systemd/system/v2ray.service
 	#fi
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /lib/systemd/system/v2ray.service ${VPSURL}${VPSPATH}/v2ray.service
+		wget -O /lib/systemd/system/v2ray.service ${VPS_CONFIG_URL}${VPSPATH}/v2ray.service
 	else
 		cp ${DIR}/v2ray.service /lib/systemd/system/v2ray.service
 	fi
@@ -1393,7 +1406,7 @@ if [ "$XRAY" = "yes" ]; then
 	fi
 	if [ ! -f /etc/xray/xray-server.json ] || [ -z "$(grep -i mptcp /etc/xray/xray-server.json | grep true)" ] || [ -z "$(grep -i transport /etc/xray/xray-server.json)" ]; then
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/xray/xray-server.json ${VPSURL}${VPSPATH}/xray-server.json
+			wget -O /etc/xray/xray-server.json ${VPS_CONFIG_URL}${VPSPATH}/xray-server.json
 		else
 			cp ${DIR}/xray-server.json /etc/xray/xray-server.json
 		fi
@@ -1402,7 +1415,7 @@ if [ "$XRAY" = "yes" ]; then
 		sed -i "s:XRAY_PSK:$PSK:g" /etc/xray/xray-server.json
 		sed -i "s:XRAY_UPSK:$UPSK:g" /etc/xray/xray-server.json
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/xray/xray-vless-reality.json ${VPSURL}${VPSPATH}/xray-vless-reality.json
+			wget -O /etc/xray/xray-vless-reality.json ${VPS_CONFIG_URL}${VPSPATH}/xray-vless-reality.json
 		else
 			cp ${DIR}/xray-vless-reality.json /etc/xray/xray-vless-reality.json
 		fi
@@ -1441,7 +1454,7 @@ if [ "$XRAY" = "yes" ]; then
 	#	mv -f /etc/systemd/system/xray.service.dpkg-dist /etc/systemd/system/xray.service
 	#fi
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /lib/systemd/system/xray.service ${VPSURL}${VPSPATH}/xray.service
+		wget -O /lib/systemd/system/xray.service ${VPS_CONFIG_URL}${VPSPATH}/xray.service
 	else
 		cp ${DIR}/xray.service /lib/systemd/system/xray.service
 	fi
@@ -1482,15 +1495,15 @@ if [ "$MLVPN" = "yes" ]; then
 		cd /tmp
 		rm -rf /tmp/mlvpn
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /lib/systemd/network/mlvpn.network ${VPSURL}${VPSPATH}/mlvpn.network
-			wget -O /lib/systemd/system/mlvpn@.service ${VPSURL}${VPSPATH}/mlvpn@.service.in
+			wget -O /lib/systemd/network/mlvpn.network ${VPS_CONFIG_URL}${VPSPATH}/mlvpn.network
+			wget -O /lib/systemd/system/mlvpn@.service ${VPS_CONFIG_URL}${VPSPATH}/mlvpn@.service.in
 		else
 			cp ${DIR}/mlvpn.network /lib/systemd/network/mlvpn.network
 			cp ${DIR}/mlvpn@.service.in /lib/systemd/system/mlvpn@.service
 		fi
 		if [ "$mlvpnupdate" = "0" ]; then
 			if [ "$LOCALFILES" = "no" ]; then
-				wget -O /etc/mlvpn/mlvpn0.conf ${VPSURL}${VPSPATH}/mlvpn0.conf
+				wget -O /etc/mlvpn/mlvpn0.conf ${VPS_CONFIG_URL}${VPSPATH}/mlvpn0.conf
 			else
 				cp ${DIR}/mlvpn0.conf /etc/mlvpn/mlvpn0.conf
 			fi
@@ -1543,8 +1556,8 @@ if [ "$UBOND" = "yes" ]; then
 #		apt-get -y -o Dpkg::Options::="--force-overwrite" install ubond
 #	fi
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /lib/systemd/network/ubond.network ${VPSURL}${VPSPATH}/ubond.network
-		wget -O /lib/systemd/system/ubond@.service ${VPSURL}${VPSPATH}/ubond@.service.in
+		wget -O /lib/systemd/network/ubond.network ${VPS_CONFIG_URL}${VPSPATH}/ubond.network
+		wget -O /lib/systemd/system/ubond@.service ${VPS_CONFIG_URL}${VPSPATH}/ubond@.service.in
 	else
 		cp ${DIR}/ubond.network /lib/systemd/network/ubond.network
 		cp ${DIR}/ubond@.service.in /lib/systemd/system/ubond@.service
@@ -1552,7 +1565,7 @@ if [ "$UBOND" = "yes" ]; then
 	mkdir -p /etc/ubond
 	if [ "$ubondupdate" = "0" ]; then
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/ubond/ubond0.conf ${VPSURL}${VPSPATH}/ubond0.conf
+			wget -O /etc/ubond/ubond0.conf ${VPS_CONFIG_URL}${VPSPATH}/ubond0.conf
 		else
 			cp ${DIR}/ubond0.conf /etc/ubond/ubond0.conf
 		fi
@@ -1632,8 +1645,8 @@ if [ "$FAIL2BAN" = "yes" ]; then
 	apt-get -y install fail2ban python3-systemd
 	systemctl enable fail2ban
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/fail2ban/jail.d/openmptcprouter.conf ${VPSURL}${VPSPATH}/fail2ban-jail-openmptcprouter.conf
-		wget -O /etc/fail2ban/filter.d/openvpn.conf ${VPSURL}${VPSPATH}/fail2ban-filter-openvpn.conf
+		wget -O /etc/fail2ban/jail.d/openmptcprouter.conf ${VPS_CONFIG_URL}${VPSPATH}/fail2ban-jail-openmptcprouter.conf
+		wget -O /etc/fail2ban/filter.d/openvpn.conf ${VPS_CONFIG_URL}${VPSPATH}/fail2ban-filter-openvpn.conf
 	else
 		cp ${DIR}/fail2ban-jail-openmptcprouter.conf /etc/fail2ban/jail.d/openmptcprouter.conf
 		cp ${DIR}/fail2ban-filter-openvpn.conf /etc/fail2ban/filter.d/openvpn.conf
@@ -1654,10 +1667,10 @@ if [ "$OPENVPN" = "yes" ]; then
 	else
 		apt-get -y --default-release install openvpn easy-rsa
 	fi
-	#wget -O /lib/systemd/network/openvpn.network ${VPSURL}${VPSPATH}/openvpn.network
+	#wget -O /lib/systemd/network/openvpn.network ${VPS_CONFIG_URL}${VPSPATH}/openvpn.network
 	rm -f /lib/systemd/network/openvpn.network
 	#if [ ! -f "/etc/openvpn/server/static.key" ]; then
-	#	wget -O /etc/openvpn/tun0.conf ${VPSURL}${VPSPATH}/openvpn-tun0.conf
+	#	wget -O /etc/openvpn/tun0.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-tun0.conf
 	#	cd /etc/openvpn/server
 	#	openvpn --genkey --secret static.key
 	#fi
@@ -1721,21 +1734,21 @@ if [ "$OPENVPN" = "yes" ]; then
 	fi
 	if [ "$LOCALFILES" = "no" ]; then
 		if [ "$KERNEL" != "5.4" ]; then
-			wget -O /etc/openvpn/tun0.conf ${VPSURL}${VPSPATH}/openvpn-tun0.6.1.conf
-			wget -O /etc/openvpn/tun1.conf ${VPSURL}${VPSPATH}/openvpn-tun1.6.1.conf
+			wget -O /etc/openvpn/tun0.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-tun0.6.1.conf
+			wget -O /etc/openvpn/tun1.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-tun1.6.1.conf
 		else
-			wget -O /etc/openvpn/tun0.conf ${VPSURL}${VPSPATH}/openvpn-tun0.conf
-			wget -O /etc/openvpn/tun1.conf ${VPSURL}${VPSPATH}/openvpn-tun1.conf
+			wget -O /etc/openvpn/tun0.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-tun0.conf
+			wget -O /etc/openvpn/tun1.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-tun1.conf
 		fi
 		if [ "$OPENVPN_BONDING" = "yes" ]; then
-			wget -O /etc/openvpn/bonding1.conf ${VPSURL}${VPSPATH}/openvpn-bonding1.conf
-			wget -O /etc/openvpn/bonding2.conf ${VPSURL}${VPSPATH}/openvpn-bonding2.conf
-			wget -O /etc/openvpn/bonding3.conf ${VPSURL}${VPSPATH}/openvpn-bonding3.conf
-			wget -O /etc/openvpn/bonding4.conf ${VPSURL}${VPSPATH}/openvpn-bonding4.conf
-			wget -O /etc/openvpn/bonding5.conf ${VPSURL}${VPSPATH}/openvpn-bonding5.conf
-			wget -O /etc/openvpn/bonding6.conf ${VPSURL}${VPSPATH}/openvpn-bonding6.conf
-			wget -O /etc/openvpn/bonding7.conf ${VPSURL}${VPSPATH}/openvpn-bonding7.conf
-			wget -O /etc/openvpn/bonding8.conf ${VPSURL}${VPSPATH}/openvpn-bonding8.conf
+			wget -O /etc/openvpn/bonding1.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding1.conf
+			wget -O /etc/openvpn/bonding2.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding2.conf
+			wget -O /etc/openvpn/bonding3.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding3.conf
+			wget -O /etc/openvpn/bonding4.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding4.conf
+			wget -O /etc/openvpn/bonding5.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding5.conf
+			wget -O /etc/openvpn/bonding6.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding6.conf
+			wget -O /etc/openvpn/bonding7.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding7.conf
+			wget -O /etc/openvpn/bonding8.conf ${VPS_CONFIG_URL}${VPSPATH}/openvpn-bonding8.conf
 		fi
 	else
 		if [ "$KERNEL" != "5.4" ]; then
@@ -1816,7 +1829,7 @@ if [ "$GLORYTUN_UDP" = "yes" ]; then
 		apt-get install -y --no-install-recommends build-essential git ca-certificates meson pkg-config
 		rm -rf /tmp/glorytun-udp
 		cd /tmp
-		git clone https://github.com/Ysurac/glorytun.git /tmp/glorytun-udp
+		git clone ${GLORYTUN_GIT_URL} /tmp/glorytun-udp
 		cd /tmp/glorytun-udp
 		git checkout ${GLORYTUN_UDP_VERSION}
 		git submodule update --init --recursive
@@ -1826,23 +1839,23 @@ if [ "$GLORYTUN_UDP" = "yes" ]; then
 		rm -f /lib/systemd/system/glorytun*
 		rm -f /lib/systemd/network/glorytun*
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /usr/local/bin/glorytun-udp-run ${VPSURL}${VPSPATH}/glorytun-udp-run
+			wget -O /usr/local/bin/glorytun-udp-run ${VPS_CONFIG_URL}${VPSPATH}/glorytun-udp-run
 		else
 			cp ${DIR}/glorytun-udp-run /usr/local/bin/glorytun-udp-run
 		fi
 		chmod 755 /usr/local/bin/glorytun-udp-run
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /lib/systemd/system/glorytun-udp@.service ${VPSURL}${VPSPATH}/glorytun-udp%40.service.in
+			wget -O /lib/systemd/system/glorytun-udp@.service ${VPS_CONFIG_URL}${VPSPATH}/glorytun-udp%40.service.in
 		else
 			cp ${DIR}/glorytun-udp@.service.in /lib/systemd/system/glorytun-udp@.service
 		fi
 		chmod 644 /lib/systemd/system/glorytun-udp@.service
-		#wget -O /lib/systemd/network/glorytun-udp.network ${VPSURL}${VPSPATH}/glorytun-udp.network
+		#wget -O /lib/systemd/network/glorytun-udp.network ${VPS_CONFIG_URL}${VPSPATH}/glorytun-udp.network
 		rm -f /lib/systemd/network/glorytun-udp.network
 		mkdir -p /etc/glorytun-udp
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /etc/glorytun-udp/post.sh ${VPSURL}${VPSPATH}/glorytun-udp-post.sh
-			wget -O /etc/glorytun-udp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun-udp
+			wget -O /etc/glorytun-udp/post.sh ${VPS_CONFIG_URL}${VPSPATH}/glorytun-udp-post.sh
+			wget -O /etc/glorytun-udp/tun0 ${VPS_CONFIG_URL}${VPSPATH}/tun0.glorytun-udp
 		else
 			cp ${DIR}/glorytun-udp-post.sh /etc/glorytun-udp/post.sh
 			cp ${DIR}/tun0.glorytun-udp /etc/glorytun-udp/tun0
@@ -1884,7 +1897,7 @@ if [ "$DSVPN" = "yes" ]; then
 		apt-get install -y --no-install-recommends build-essential git ca-certificates
 		rm -rf /tmp/dsvpn
 		cd /tmp
-		git clone https://github.com/ysurac/dsvpn.git /tmp/dsvpn
+		git clone ${DSVPN_GIT_URL} /tmp/dsvpn
 		cd /tmp/dsvpn
 		git checkout ${DSVPN_VERSION}
 		make CFLAGS='-DNO_DEFAULT_ROUTES -DNO_DEFAULT_FIREWALL'
@@ -1892,9 +1905,9 @@ if [ "$DSVPN" = "yes" ]; then
 		rm -f /lib/systemd/system/dsvpn/*
 		mkdir -p /etc/dsvpn
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /usr/local/bin/dsvpn-run ${VPSURL}${VPSPATH}/dsvpn-run
-			wget -O /lib/systemd/system/dsvpn-server@.service ${VPSURL}${VPSPATH}/dsvpn-server%40.service.in
-			wget -O /etc/dsvpn/dsvpn0 ${VPSURL}${VPSPATH}/dsvpn0-config
+			wget -O /usr/local/bin/dsvpn-run ${VPS_CONFIG_URL}${VPSPATH}/dsvpn-run
+			wget -O /lib/systemd/system/dsvpn-server@.service ${VPS_CONFIG_URL}${VPSPATH}/dsvpn-server%40.service.in
+			wget -O /etc/dsvpn/dsvpn0 ${VPS_CONFIG_URL}${VPSPATH}/dsvpn0-config
 		else
 			cp ${DIR}/dsvpn-run /usr/local/bin/dsvpn-run
 			cp ${DIR}/dsvpn-server@.service.in /lib/systemd/system/dsvpn-server@.service
@@ -1954,7 +1967,7 @@ if [ "$GLORYTUN_TCP" = "yes" ]; then
 			#	mv /tmp/glorytun-tcp /tmp/glorytun-0.0.35
 			#fi
 			echo "Clone glorytun"
-			git clone https://github.com/Ysurac/glorytun.git glorytun-0.0.35
+			git clone ${GLORYTUN_GIT_URL} glorytun-0.0.35
 			cd glorytun-0.0.35
 			echo "checkout ${GLORYTUN_TCP_VERSION}"
 			git checkout ${GLORYTUN_TCP_VERSION}
@@ -1965,8 +1978,8 @@ if [ "$GLORYTUN_TCP" = "yes" ]; then
 		fi
 		if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "13" ]; then
 			echo "Patch Glorytun TCP"
-			wget https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/glorytun/patches/001-fix-compilation-errors-gcc14.patch
-			wget https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/glorytun/patches/002-fix-crypto-aead-pointer-types.patch
+			wget ${OMR_FEEDS_BASE_URL}/glorytun/patches/001-fix-compilation-errors-gcc14.patch
+			wget ${OMR_FEEDS_BASE_URL}/glorytun/patches/002-fix-crypto-aead-pointer-types.patch
 			patch -p1 < 001-fix-compilation-errors-gcc14.patch
 			patch -p1 < 002-fix-crypto-aead-pointer-types.patch
 		fi
@@ -1976,10 +1989,10 @@ if [ "$GLORYTUN_TCP" = "yes" ]; then
 		cp glorytun /usr/local/bin/glorytun-tcp
 		mkdir -p /etc/glorytun-tcp
 		if [ "$LOCALFILES" = "no" ]; then
-			wget -O /usr/local/bin/glorytun-tcp-run ${VPSURL}${VPSPATH}/glorytun-tcp-run
-			wget -O /lib/systemd/system/glorytun-tcp@.service ${VPSURL}${VPSPATH}/glorytun-tcp%40.service.in
-			wget -O /etc/glorytun-tcp/post.sh ${VPSURL}${VPSPATH}/glorytun-tcp-post.sh
-			wget -O /etc/glorytun-tcp/tun0 ${VPSURL}${VPSPATH}/tun0.glorytun
+			wget -O /usr/local/bin/glorytun-tcp-run ${VPS_CONFIG_URL}${VPSPATH}/glorytun-tcp-run
+			wget -O /lib/systemd/system/glorytun-tcp@.service ${VPS_CONFIG_URL}${VPSPATH}/glorytun-tcp%40.service.in
+			wget -O /etc/glorytun-tcp/post.sh ${VPS_CONFIG_URL}${VPSPATH}/glorytun-tcp-post.sh
+			wget -O /etc/glorytun-tcp/tun0 ${VPS_CONFIG_URL}${VPSPATH}/tun0.glorytun
 		else
 			cp ${DIR}/glorytun-tcp-run /usr/local/bin/glorytun-tcp-run
 			cp ${DIR}/glorytun-tcp@.service.in /lib/systemd/system/glorytun-tcp@.service
@@ -2090,7 +2103,7 @@ fi
 
 # Add multipath utility
 if [ "$LOCALFILES" = "no" ]; then
-	wget -O /usr/local/bin/multipath ${VPSURL}${VPSPATH}/multipath
+	wget -O /usr/local/bin/multipath ${VPS_CONFIG_URL}${VPSPATH}/multipath
 else
 	cp ${DIR}/multipath /usr/local/bin/multipath
 fi
@@ -2098,7 +2111,7 @@ chmod 755 /usr/local/bin/multipath
 
 # Add omr-test-speed utility
 if [ "$LOCALFILES" = "no" ]; then
-	wget -O /usr/local/bin/omr-test-speed ${VPSURL}${VPSPATH}/omr-test-speed
+	wget -O /usr/local/bin/omr-test-speed ${VPS_CONFIG_URL}${VPSPATH}/omr-test-speed
 else
 	cp ${DIR}/omr-test-speed /usr/local/bin/omr-test-speed
 fi
@@ -2106,13 +2119,13 @@ chmod 755 /usr/local/bin/omr-test-speed
 
 # Add OpenMPTCProuter service
 if [ "$LOCALFILES" = "no" ]; then
-	wget -O /usr/local/bin/omr-service ${VPSURL}${VPSPATH}/omr-service
-	wget -O /lib/systemd/system/omr.service ${VPSURL}${VPSPATH}/omr.service.in
-	wget -O /usr/local/bin/omr-6in4-run ${VPSURL}${VPSPATH}/omr-6in4-run
-	wget -O /lib/systemd/system/omr6in4@.service ${VPSURL}${VPSPATH}/omr6in4%40.service.in
-	wget -O /usr/local/bin/omr-bypass ${VPSURL}${VPSPATH}/omr-bypass
-	wget -O /lib/systemd/system/omr-bypass.service ${VPSURL}${VPSPATH}/omr-bypass.service.in
-	wget -O /lib/systemd/system/omr-bypass.timer ${VPSURL}${VPSPATH}/omr-bypass.timer.in
+	wget -O /usr/local/bin/omr-service ${VPS_CONFIG_URL}${VPSPATH}/omr-service
+	wget -O /lib/systemd/system/omr.service ${VPS_CONFIG_URL}${VPSPATH}/omr.service.in
+	wget -O /usr/local/bin/omr-6in4-run ${VPS_CONFIG_URL}${VPSPATH}/omr-6in4-run
+	wget -O /lib/systemd/system/omr6in4@.service ${VPS_CONFIG_URL}${VPSPATH}/omr6in4%40.service.in
+	wget -O /usr/local/bin/omr-bypass ${VPS_CONFIG_URL}${VPSPATH}/omr-bypass
+	wget -O /lib/systemd/system/omr-bypass.service ${VPS_CONFIG_URL}${VPSPATH}/omr-bypass.service.in
+	wget -O /lib/systemd/system/omr-bypass.timer ${VPS_CONFIG_URL}${VPSPATH}/omr-bypass.timer.in
 else
 	cp ${DIR}/omr-service /usr/local/bin/omr-service
 	cp ${DIR}/omr.service.in /lib/systemd/system/omr.service
@@ -2154,7 +2167,7 @@ if [ "$update" = "0" ]; then
 	# Install and configure the firewall using shorewall
 	apt-get -y install shorewall shorewall6
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/shorewall/openmptcprouter-shorewall.tar.gz ${VPSURL}${VPSPATH}/openmptcprouter-shorewall.tar.gz
+		wget -O /etc/shorewall/openmptcprouter-shorewall.tar.gz ${VPS_CONFIG_URL}${VPSPATH}/openmptcprouter-shorewall.tar.gz
 	else
 		cp ${DIR}/openmptcprouter-shorewall.tar.gz /etc/shorewall/openmptcprouter-shorewall.tar.gz
 	fi
@@ -2165,7 +2178,7 @@ if [ "$update" = "0" ]; then
 		systemctl enable shorewall
 	fi
 	if [ "$LOCALFILES" = "no" ]; then
-		wget -O /etc/shorewall6/openmptcprouter-shorewall6.tar.gz ${VPSURL}${VPSPATH}/openmptcprouter-shorewall6.tar.gz
+		wget -O /etc/shorewall6/openmptcprouter-shorewall6.tar.gz ${VPS_CONFIG_URL}${VPSPATH}/openmptcprouter-shorewall6.tar.gz
 	else
 		cp ${DIR}/openmptcprouter-shorewall6.tar.gz /etc/shorewall6/openmptcprouter-shorewall6.tar.gz
 	fi
@@ -2179,8 +2192,8 @@ else
 	# Update only needed firewall files
 	if [ "$LOCALFILES" = "no" ]; then
 		mkdir -p ${DIR}
-		wget -O ${DIR}/openmptcprouter-shorewall.tar.gz ${VPSURL}${VPSPATH}/openmptcprouter-shorewall.tar.gz
-		wget -O ${DIR}/openmptcprouter-shorewall6.tar.gz ${VPSURL}${VPSPATH}/openmptcprouter-shorewall6.tar.gz
+		wget -O ${DIR}/openmptcprouter-shorewall.tar.gz ${VPS_CONFIG_URL}${VPSPATH}/openmptcprouter-shorewall.tar.gz
+		wget -O ${DIR}/openmptcprouter-shorewall6.tar.gz ${VPS_CONFIG_URL}${VPSPATH}/openmptcprouter-shorewall6.tar.gz
 		mkdir -p ${DIR}/shorewall4
 		tar xzvf ${DIR}/openmptcprouter-shorewall.tar.gz -C ${DIR}/shorewall4
 		mkdir -p ${DIR}/shorewall6
