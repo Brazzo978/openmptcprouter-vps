@@ -2501,6 +2501,10 @@ if [ "$update" = "0" ]; then
 		echo 'No working domain detected, not able to generate certificate for v2ray.'
 		echo 'You can set VPS_DOMAIN to a working domain if you want a certificate.'
 	fi
+	if [ "$OMR_ADMIN" = "yes" ]; then
+		systemctl reset-failed omr-admin.service >/dev/null 2>&1 || true
+		systemctl restart omr-admin.service >/dev/null 2>&1 || true
+	fi
 	echo '===================================================================================='
 	echo 'Keys are also saved in /root/openmptcprouter_config.txt, you are free to remove them'
 	echo '===================================================================================='
