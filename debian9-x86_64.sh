@@ -542,10 +542,14 @@ elif [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
 #	apt-get update
 #	apt-get -y install linux-xanmod-lts-x64v3
 	[ -f /etc/default/grub ] && {
-		sed -i "s@^\(GRUB_DEFAULT=\).*@\1\"0\"@" /etc/default/grub >/dev/null 2>&1
-		if [ -f /boot/grub/grub.cfg ]; then 
-			BOOTNB=$(grep vmlinuz- /boot/grub/grub.cfg | grep -n -m 1 xanmod | sed -e 's/:.*//g' | tr -d '\n')
-			[ -n "$BOOTNB" ] && sed -i "s@^\(GRUB_DEFAULT=\).*@\1\"${BOOTNB}\"@" /etc/default/grub >/dev/null 2>&1
+		sed -i "s@^\(GRUB_DEFAULT=\).*@\1saved@" /etc/default/grub >/dev/null 2>&1
+		grep -q '^GRUB_SAVEDEFAULT=' /etc/default/grub && \
+			sed -i "s@^\(GRUB_SAVEDEFAULT=\).*@\1true@" /etc/default/grub >/dev/null 2>&1 || \
+			echo 'GRUB_SAVEDEFAULT=true' >> /etc/default/grub
+		if [ -f /boot/grub/grub.cfg ]; then
+			KREL="${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
+			BOOTID=$(awk -F"'" -v k="$KREL" '$0 ~ "menuentry " && $0 ~ k && $0 !~ /recovery/ {for(i=1;i<=NF;i++) if($i ~ /^gnulinux-/) {print $i; exit}}' /boot/grub/grub.cfg)
+			[ -n "$BOOTID" ] && grub-set-default "$BOOTID" >/dev/null 2>&1 || true
 			grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
 		fi
 	}
