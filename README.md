@@ -1,43 +1,43 @@
+# OpenMPTCProuter VPS Fork (`omr-vps-0.1028-def`)
 
-This fork focuses on bringing back the ability for all the user to install previus version of the vps script , to get full compatibility with older client with version 0.59.1 this uses the original package from 1028-era vps installation script , some provided by the openmptcprouter repo and some from this fork in the pack folder.
+This branch is a maintained fork of the historical `0.1028` VPS installer, made to support older OMR clients (for example `0.59.x`) with predictable behavior.
 
-Currently the only thing changed from the original 1028 stock is the glorytun tcp version , from omr-glorytun-tcp_0.0.35-3_amd64.deb to omr-glorytun-tcp_0.0.35-6_amd64.deb which is the latest , if problems arise i will patch to use the original one.
+## Scope
 
-The script has been fully cleaned from useless feature like upstream kernel.
-The script now runs only and i say ONLY on debian 11 by default , it will not run on debian 12 or later , or debian 10/9 , because upgrading from those older version made use of dead dependencies and is now harder , so get a vps with debian 11 already and this will work.
+- Target OS is **Debian 11 (Bullseye) only**.
+- The installer is intentionally strict and does not support Debian 9/10/12/13.
+- Goal is a stable legacy-compatible VPS deployment, not feature parity with newer upstream releases.
 
-To install just Run this command.
-> ```bash
-> curl -sL https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1028-def/debian9-x86_64.sh | bash
-> ```
+## What Is Changed In This Fork
 
+- Removed dependency on unstable upstream endpoints and switched to fork-controlled sources.
+- Kept the `0.1028` stack and package behavior expected by legacy clients.
+- Upgraded Glorytun TCP package from `0.0.35-3` to `0.0.35-6`.
+- OpenVPN bonding services are disabled by default.
+- Added hardening for `omr-admin` runtime on modern Debian 11 images:
+  - Force compatible Python stack: `pydantic<2`, `fastapi<0.100`, `starlette<0.28`, `uvloop<0.20`.
+  - Create `/etc/shorewall/params.net` and `/etc/shorewall6/params.net` early to avoid startup race/crash.
+  - Reset/restart `omr-admin` services at install end for clean first boot.
+- Installer still moves SSH to port `65222` at the end (expected behavior).
 
+## Clean Install
 
-REGULAR INSTALL STUFF : 
-# OpenMPTCProuter VPS scripts
+If `curl` is missing on a fresh Debian 11 VM:
 
-All scripts needed to install OpenMPTCProuter VPS.
+```bash
+apt-get update && apt-get install -y curl
+```
 
-This is the VPS part of [OpenMPTCProuter](https://www.openmptcprouter.com/), a solution to aggregate multiple internet connections.
- 
-* ```debian9-x86_64.sh```: The main script install ShadowSocks, Glorytun TCP, Glorytun UDP, Shorewall, the MPTCP kernel and can install OpenVPN
-* ```debian9-x86_64-mlvpn.sh```: Script to install MLVPN
-* ```config.json```: shadowsocks config
-* ```/shorewall4```: shorewall default configuration
-* ```/shorewall6```: shorewall6 default configuration
-* ```glorytun-tcp-run```: script to run glorytun with configuration parameters
-* ```glorytun-tcp@.service.in```: glorytun systemd service
-* ```glorytun.network```: glorytun systemd network (for DHCP)
-* ```glorytun-udp-run```: script to run glorytun UDP with configuration parameters
-* ```glorytun-udp.network```: glorytun UDP systemd network (for DHCP)
-* ```glorytun-udp@.service.in```: glorytun UDP systemd service
-* ```mlvpn.network```: MLVPN systemd network (for DHCP)
-* ```mlvpn0.conf```: MLVPN default config
-* ```omr-6in4-service```: Script used to make 6in4 tunnel always up and detect ip used by OpenMPTCProuter to config Shorewall
-* ```omr-6in4.service.in```: Systemd service to run the script
-* ```openvpn-tun0.cnf```: OpenVPN default config
-* ```openvpn.network```: OpenVPN systemd network (for DHCP)
-* ```shadowsocks.conf```: shadowsocks sysctl.d optimization and mptcp config
-* ```tun0.glorytun```: glorytun default configuration
-* ```tun0.glorytun-udp```: glorytun default configuration
-* ```update-grub.sh```: Script used to check if MPTCP kernel is the default
+Run installer:
+
+```bash
+curl -sL https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1028-def/debian9-x86_64.sh | bash
+```
+
+## Expected Result
+
+- Installer completes without manual patching.
+- SSH moves from `22` to `65222`.
+- OMR API listens on `65500`.
+- `omr-admin` and `omr-admin-ipv6` are active after install.
+- Reboot is required to boot into the installed MPTCP kernel (`5.4.207-mptcp`).
