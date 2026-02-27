@@ -41,3 +41,9 @@ curl -sL https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps
 - OMR API listens on `65500`.
 - `omr-admin` and `omr-admin-ipv6` are active after install.
 - Reboot is required to boot into the installed MPTCP kernel (`5.4.207-mptcp`).
+
+## Client Patches And Images
+
+- Ready client images and client-side patch assets are under `CLIENT/`.
+- Manual client patch instructions are in `Patch.md`.
+- The patched client targets legacy `0.59.x` behavior and includes tracker recovery fixes required for stable VPN re-sync.
