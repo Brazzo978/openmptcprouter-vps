@@ -89,6 +89,18 @@ export LC_ALL=C
 export PATH=$PATH:/sbin
 export DEBIAN_FRONTEND=noninteractive 
 
+ensure_omr_admin_runtime() {
+	# Keep legacy omr-admin compatible with Debian 11 userland.
+	pip3 -q install --upgrade "uvloop<0.20" "fastapi<0.100" "pydantic<2" "starlette<0.28"
+}
+
+ensure_shorewall_params_net() {
+	# omr-admin reads these files at startup; create placeholders early to avoid boot loops.
+	mkdir -p /etc/shorewall /etc/shorewall6
+	[ -f /etc/shorewall/params.net ] || echo "NET_IFACE=${INTERFACE}" > /etc/shorewall/params.net
+	[ -f /etc/shorewall6/params.net ] || echo "NET_IFACE=${INTERFACE}" > /etc/shorewall6/params.net
+}
+
 echo "Check user..."
 if [ "$(id -u)" -ne 0 ]; then echo 'Please run as root.' >&2; exit 1; fi
 
@@ -429,19 +441,18 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	#apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
 	#apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
         apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
-        # uvloop >=0.20 breaks old uvicorn startup path used by omr-admin on Debian 11.
-        pip3 -q install "uvloop<0.20"
 	apt-get -y --allow-downgrades install python3-uvicorn jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
 	echo '-- pip3 install needed python modules'
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
 	#pip3 install pyjwt passlib uvicorn fastapi netjsonconfig python-multipart netaddr
 	#pip3 -q install fastapi netjsonconfig python-multipart uvicorn -U
 	pip3 -q install netjsonconfig
-	pip3 -q install "fastapi<0.100" "pydantic<2" "starlette<0.28"
+	ensure_omr_admin_runtime
 	pip3 -q install jsonschema -U
 	pip3 -q install python-multipart jinja2 -U
 	mkdir -p /etc/openmptcprouter-vps-admin/omr-6in4
 	mkdir -p /etc/openmptcprouter-vps-admin/intf
+	ensure_shorewall_params_net
 	[ ! -f "/etc/openmptcprouter-vps-admin/current-vpn" ] && echo "glorytun_tcp" > /etc/openmptcprouter-vps-admin/current-vpn
 	mkdir -p /var/opt/openmptcprouter
 	if [ "$SOURCES" = "yes" ]; then
@@ -491,6 +502,8 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 		#OMR_ADMIN_PASS=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].openmptcprouter.user_password | tr -d "\n")
 		#OMR_ADMIN_PASS_ADMIN=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 	fi
+	# omr-vps-admin postinst installs unpinned python packages; re-pin to known-good set.
+	ensure_omr_admin_runtime
 	if [ ! -f /etc/openmptcprouter-vps-admin/key.pem ]; then
 		cd /etc/openmptcprouter-vps-admin
 		openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 -keyout key.pem -out cert.pem -subj "/C=US/ST=Oregon/L=Portland/O=OpenMPTCProuterVPS/OU=Org/CN=www.openmptcprouter.vps"
@@ -506,6 +519,15 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 		systemctl enable omr-admin-ipv6.service
 	}
         systemctl enable omr-admin.service
+	systemctl reset-failed omr-admin.service omr-admin-ipv6.service >/dev/null 2>&1 || true
+	if ! systemctl restart omr-admin.service >/dev/null 2>&1; then
+		echo "Warning: omr-admin.service failed to start, check journalctl -u omr-admin.service"
+	fi
+	if [ "$(ip -6 a)" != "" ]; then
+		if ! systemctl restart omr-admin-ipv6.service >/dev/null 2>&1; then
+			echo "Warning: omr-admin-ipv6.service failed to start, check journalctl -u omr-admin-ipv6.service"
+		fi
+	fi
 fi
 
 # Get shadowsocks optimization
@@ -1353,6 +1375,7 @@ if [ "$update" = "0" ]; then
 		Your OpenMPTCProuter Server username: openmptcprouter
 		EOF
 	fi
+	echo "Restart sshd on port 65222..."
 	systemctl -q restart sshd
 else
 	echo '===================================================================================='
