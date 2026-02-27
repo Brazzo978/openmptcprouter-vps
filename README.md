@@ -45,5 +45,7 @@ curl -sL https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps
 ## Client Patches And Images
 
 - Ready client images and client-side patch assets are under `CLIENT/`.
+- Prebuilt client images release: `v0.59.2-3KTEST-client`
+  - https://github.com/Brazzo978/openmptcprouter-vps/releases/tag/v0.59.2-3KTEST-client
 - Manual client patch instructions are in `Patch.md`.
 - The patched client targets legacy `0.59.x` behavior and includes tracker recovery fixes required for stable VPN re-sync.
