@@ -13,7 +13,7 @@ This branch is a maintained fork of the historical `0.1028` VPS installer, made 
 - Removed dependency on unstable upstream endpoints and switched to fork-controlled sources.
 - Kept the `0.1028` stack and package behavior expected by legacy clients.
 - Upgraded Glorytun TCP package from `0.0.35-3` to `0.0.35-6`.
-- OpenVPN bonding services are disabled by default.
+- OpenVPN bonding services are disabled by default(they usually dont work and when they do is terrible).
 - Added hardening for `omr-admin` runtime on modern Debian 11 images:
   - Force compatible Python stack: `pydantic<2`, `fastapi<0.100`, `starlette<0.28`, `uvloop<0.20`.
   - Create `/etc/shorewall/params.net` and `/etc/shorewall6/params.net` early to avoid startup race/crash.
