@@ -1,6 +1,9 @@
 #!/bin/sh
+OMR_UPDATE_BRANCH="${OMR_UPDATE_BRANCH:-omr-vps-0.1028-def}"
+OMR_UPDATE_SCRIPT_URL="${OMR_UPDATE_SCRIPT_URL:-https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/${OMR_UPDATE_BRANCH}/debian9-x86_64.sh}"
+
 if [ -f /etc/openmptcprouter-vps-admin/update ]; then
-        wget -O - http://www.openmptcprouter.com/server/debian10-x86_64.sh | sh
+        wget -O - "${OMR_UPDATE_SCRIPT_URL}" | sh
         rm -f /etc/openmptcprouter-vps-admin/update
         reboot
 fi

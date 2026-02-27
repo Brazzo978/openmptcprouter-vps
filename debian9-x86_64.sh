@@ -26,6 +26,7 @@ MLVPN_PASS=${MLVPN_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
 UBOND=${UBOND:-no}
 UBOND_PASS=${UBOND_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
 OPENVPN=${OPENVPN:-yes}
+OPENVPN_BONDING=${OPENVPN_BONDING:-no}
 DSVPN=${DSVPN:-yes}
 WIREGUARD=${WIREGUARD:-yes}
 SOURCES=${SOURCES:-no}
@@ -58,11 +59,24 @@ SHADOWSOCKS_VERSION="7407b214f335f0e2068a8622ef3674d868218e17"
 IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 DEFAULT_USER="openmptcprouter"
-VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
-VPSPATH="omr-vps-0.1028-def/server"
-VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com)}
-VPSURL="https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/"
-REPO="repo.openmptcprouter.com"
+
+# Fork defaults: keep installer independent from upstream infrastructure.
+OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1028-def}
+OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
+OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
+OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
+OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://repoomr.3klab.com/openmptcprouter.gpg.key}
+OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
+OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-${OMR_VPS_ADMIN_GIT_URL%*.git}/archive/${OMR_ADMIN_VERSION}.zip}
+SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
+OMR_FEEDS_BASE_URL=${OMR_FEEDS_BASE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-feeds/develop}
+
+VPS_DOMAIN=${VPS_DOMAIN:-$(hostname -f 2>/dev/null || hostname)}
+VPSPATH=${VPSPATH:-${OMR_VPS_BRANCH}/server}
+VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}' | tr -d "\n")}
+VPSURL=${VPSURL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/}
+REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-no}
 
 OMR_VERSION="0.1028-3KTEST"
@@ -141,7 +155,7 @@ fi
 # Force update key
 [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
 	echo "Update OpenMPTCProuter repo key"
-	wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
+	wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
 }
 
 CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}')"
@@ -152,8 +166,7 @@ fi
 [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
 	echo "Update ${REPO} key"
 	if [ "$CHINA" = "yes" ]; then
-		#wget -O - https://gitee.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
-		wget -O - https://gitlab.com/ysurac/openmptcprouter-vps-debian/raw/main/openmptcprouter.gpg.key | apt-key add -
+		wget -O - "${OMR_VPS_DEBIAN_GPG_URL}" | apt-key add -
 	else
 		wget -O - https://${REPO}/openmptcprouter.gpg.key | apt-key add -
 	fi
@@ -176,29 +189,19 @@ if [ "$CHINA" = "yes" ]; then
 	echo "Install git..."
 	apt-get -y install git
 	if [ ! -d /var/lib/openmptcprouter-vps-debian ]; then
-		#git clone https://gitee.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps-debian.git /var/lib/openmptcprouter-vps-debian
+		git clone "${OMR_VPS_DEBIAN_GIT_URL}" /var/lib/openmptcprouter-vps-debian
 	fi
 	cd /var/lib/openmptcprouter-vps-debian
 	git pull
-#	if [ "$VPSPATH" = "server-test" ]; then
-#		git checkout develop
-#	else
-#		git checkout main
-#	fi
+	git checkout "${OMR_VPS_DEBIAN_BRANCH}" >/dev/null 2>&1 || true
 	echo "deb [arch=amd64] file:/var/lib/openmptcprouter-vps-debian ./" > /etc/apt/sources.list.d/openmptcprouter.list
 	cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add -
 	if [ ! -d /usr/share/omr-server-git ]; then
-		#git clone https://gitee.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
-		git clone https://gitlab.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
+		git clone "${OMR_VPS_GIT_URL}" /usr/share/omr-server-git
 	fi
 	cd /usr/share/omr-server-git
 	git pull
-	if [ "$VPSPATH" = "server-test" ]; then
-		git checkout develop
-	else
-		git checkout master
-	fi
+	git checkout "${OMR_VPS_BRANCH}" >/dev/null 2>&1 || git checkout master >/dev/null 2>&1 || true
 	LOCALFILES="yes"
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
@@ -306,22 +309,22 @@ if [ "$SOURCES" = "yes" ]; then
 	#wget -O /tmp/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz http://github.com/shadowsocks/shadowsocks-libev/releases/download/v${SHADOWSOCKS_VERSION}/shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz
 	cd /tmp
 	rm -rf shadowsocks-libev
-	git clone https://github.com/Ysurac/shadowsocks-libev.git
+	git clone "${SHADOWSOCKS_GIT_URL}"
 	cd shadowsocks-libev
 	git checkout ${SHADOWSOCKS_VERSION}
 	git submodule update --init --recursive
 	#tar xzf shadowsocks-libev-${SHADOWSOCKS_VERSION}.tar.gz
 	#cd shadowsocks-libev-${SHADOWSOCKS_VERSION}
-	#wget https://raw.githubusercontent.com/Ysurac/openmptcprouter-feeds/master/shadowsocks-libev/patches/020-NOCRYPTO.patch
+	#wget ${OMR_FEEDS_BASE_URL}/shadowsocks-libev/patches/020-NOCRYPTO.patch
 	#patch -p1 < 020-NOCRYPTO.patch
-	#wget https://github.com/Ysurac/shadowsocks-libev/commit/31b93ac2b054bc3f68ea01569649e6882d72218e.patch
+	#wget ${SHADOWSOCKS_GIT_URL%*.git}/commit/31b93ac2b054bc3f68ea01569649e6882d72218e.patch
 	#patch -p1 < 31b93ac2b054bc3f68ea01569649e6882d72218e.patch
-	#wget https://github.com/Ysurac/shadowsocks-libev/commit/2e52734b3bf176966e78e77cf080a1e8c6b2b570.patch
+	#wget ${SHADOWSOCKS_GIT_URL%*.git}/commit/2e52734b3bf176966e78e77cf080a1e8c6b2b570.patch
 	#patch -p1 < 2e52734b3bf176966e78e77cf080a1e8c6b2b570.patch
-	#wget https://github.com/Ysurac/shadowsocks-libev/commit/dd1baa91e975a69508f9ad67d75d72624c773d24.patch
+	#wget ${SHADOWSOCKS_GIT_URL%*.git}/commit/dd1baa91e975a69508f9ad67d75d72624c773d24.patch
 	#patch -p1 < dd1baa91e975a69508f9ad67d75d72624c773d24.patch
 	# Shadowsocks eBPF support
-	#wget https://raw.githubusercontent.com/Ysurac/openmptcprouter-feeds/master/shadowsocks-libev/patches/030-eBPF.patch
+	#wget ${OMR_FEEDS_BASE_URL}/shadowsocks-libev/patches/030-eBPF.patch
 	#patch -p1 < 030-eBPF.patch
 	#rm -f /var/lib/dpkg/lock
 	#apt-get install -y --no-install-recommends build-essential git ca-certificates libcap-dev libelf-dev libpcap-dev
@@ -426,7 +429,8 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	#apt-get -y install unzip gunicorn python3-flask-restful python3-openssl python3-pip python3-setuptools python3-wheel
 	#apt-get -y install unzip python3-openssl python3-pip python3-setuptools python3-wheel
         apt-get -y --allow-downgrades install python3-passlib python3-jwt python3-netaddr libuv1
-        pip3 -q install uvloop
+        # uvloop >=0.20 breaks old uvicorn startup path used by omr-admin on Debian 11.
+        pip3 -q install "uvloop<0.20"
 	apt-get -y --allow-downgrades install python3-uvicorn jq ipcalc python3-netifaces python3-aiofiles python3-psutil python3-requests pwgen
 	echo '-- pip3 install needed python modules'
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
@@ -443,7 +447,7 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	if [ "$SOURCES" = "yes" ]; then
 		wget -O /lib/systemd/system/omr-admin.service ${VPSURL}${VPSPATH}/omr-admin.service.in
 		wget -O /lib/systemd/system/omr-admin-ipv6.service ${VPSURL}${VPSPATH}/omr-admin-ipv6.service.in
-		wget -O /tmp/openmptcprouter-vps-admin.zip https://github.com/Ysurac/openmptcprouter-vps-admin/archive/${OMR_ADMIN_VERSION}.zip
+		wget -O /tmp/openmptcprouter-vps-admin.zip "${OMR_ADMIN_ARCHIVE_URL}"
 		cd /tmp
 		unzip -q -o openmptcprouter-vps-admin.zip
 		cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
@@ -841,7 +845,8 @@ if [ "$OPENVPN" = "yes" ]; then
 	echo "Install OpenVPN"
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
-	apt-get -y install openvpn easy-rsa
+	# Force Bullseye OpenVPN to avoid incompatible t64 builds from custom repos.
+	apt-get -y install openvpn/bullseye easy-rsa/bullseye
 	#wget -O /lib/systemd/network/openvpn.network ${VPSURL}${VPSPATH}/openvpn.network
 	rm -f /lib/systemd/network/openvpn.network
 	#if [ ! -f "/etc/openvpn/server/static.key" ]; then
@@ -883,37 +888,49 @@ if [ "$OPENVPN" = "yes" ]; then
 	if [ "$LOCALFILES" = "no" ]; then
 		wget -O /etc/openvpn/tun0.conf ${VPSURL}${VPSPATH}/openvpn-tun0.conf
 		wget -O /etc/openvpn/tun1.conf ${VPSURL}${VPSPATH}/openvpn-tun1.conf
-		wget -O /etc/openvpn/bonding1.conf ${VPSURL}${VPSPATH}/openvpn-bonding1.conf
-		wget -O /etc/openvpn/bonding2.conf ${VPSURL}${VPSPATH}/openvpn-bonding2.conf
-		wget -O /etc/openvpn/bonding3.conf ${VPSURL}${VPSPATH}/openvpn-bonding3.conf
-		wget -O /etc/openvpn/bonding4.conf ${VPSURL}${VPSPATH}/openvpn-bonding4.conf
-		wget -O /etc/openvpn/bonding5.conf ${VPSURL}${VPSPATH}/openvpn-bonding5.conf
-		wget -O /etc/openvpn/bonding6.conf ${VPSURL}${VPSPATH}/openvpn-bonding6.conf
-		wget -O /etc/openvpn/bonding7.conf ${VPSURL}${VPSPATH}/openvpn-bonding7.conf
-		wget -O /etc/openvpn/bonding8.conf ${VPSURL}${VPSPATH}/openvpn-bonding8.conf
+		if [ "$OPENVPN_BONDING" = "yes" ]; then
+			wget -O /etc/openvpn/bonding1.conf ${VPSURL}${VPSPATH}/openvpn-bonding1.conf
+			wget -O /etc/openvpn/bonding2.conf ${VPSURL}${VPSPATH}/openvpn-bonding2.conf
+			wget -O /etc/openvpn/bonding3.conf ${VPSURL}${VPSPATH}/openvpn-bonding3.conf
+			wget -O /etc/openvpn/bonding4.conf ${VPSURL}${VPSPATH}/openvpn-bonding4.conf
+			wget -O /etc/openvpn/bonding5.conf ${VPSURL}${VPSPATH}/openvpn-bonding5.conf
+			wget -O /etc/openvpn/bonding6.conf ${VPSURL}${VPSPATH}/openvpn-bonding6.conf
+			wget -O /etc/openvpn/bonding7.conf ${VPSURL}${VPSPATH}/openvpn-bonding7.conf
+			wget -O /etc/openvpn/bonding8.conf ${VPSURL}${VPSPATH}/openvpn-bonding8.conf
+		fi
 	else
 		cp ${DIR}/openvpn-tun0.conf /etc/openvpn/tun0.conf
 		cp ${DIR}/openvpn-tun1.conf /etc/openvpn/tun1.conf
-		cp ${DIR}/openvpn-bonding1.conf /etc/openvpn/bonding1.conf
-		cp ${DIR}/openvpn-bonding2.conf /etc/openvpn/bonding2.conf
-		cp ${DIR}/openvpn-bonding3.conf /etc/openvpn/bonding3.conf
-		cp ${DIR}/openvpn-bonding4.conf /etc/openvpn/bonding4.conf
-		cp ${DIR}/openvpn-bonding5.conf /etc/openvpn/bonding5.conf
-		cp ${DIR}/openvpn-bonding6.conf /etc/openvpn/bonding6.conf
-		cp ${DIR}/openvpn-bonding7.conf /etc/openvpn/bonding7.conf
-		cp ${DIR}/openvpn-bonding8.conf /etc/openvpn/bonding8.conf
+		if [ "$OPENVPN_BONDING" = "yes" ]; then
+			cp ${DIR}/openvpn-bonding1.conf /etc/openvpn/bonding1.conf
+			cp ${DIR}/openvpn-bonding2.conf /etc/openvpn/bonding2.conf
+			cp ${DIR}/openvpn-bonding3.conf /etc/openvpn/bonding3.conf
+			cp ${DIR}/openvpn-bonding4.conf /etc/openvpn/bonding4.conf
+			cp ${DIR}/openvpn-bonding5.conf /etc/openvpn/bonding5.conf
+			cp ${DIR}/openvpn-bonding6.conf /etc/openvpn/bonding6.conf
+			cp ${DIR}/openvpn-bonding7.conf /etc/openvpn/bonding7.conf
+			cp ${DIR}/openvpn-bonding8.conf /etc/openvpn/bonding8.conf
+		fi
 	fi
 	mkdir -p /etc/openvpn/ccd
 	systemctl enable openvpn@tun0.service
         systemctl enable openvpn@tun1.service
-        systemctl enable openvpn@bonding1.service
-	systemctl enable openvpn@bonding2.service
-	systemctl enable openvpn@bonding3.service
-	systemctl enable openvpn@bonding4.service
-	systemctl enable openvpn@bonding5.service
-	systemctl enable openvpn@bonding6.service
-	systemctl enable openvpn@bonding7.service
-	systemctl enable openvpn@bonding8.service
+	if [ "$OPENVPN_BONDING" = "yes" ]; then
+	        systemctl enable openvpn@bonding1.service
+		systemctl enable openvpn@bonding2.service
+		systemctl enable openvpn@bonding3.service
+		systemctl enable openvpn@bonding4.service
+		systemctl enable openvpn@bonding5.service
+		systemctl enable openvpn@bonding6.service
+		systemctl enable openvpn@bonding7.service
+		systemctl enable openvpn@bonding8.service
+	else
+		for i in 1 2 3 4 5 6 7 8; do
+			systemctl disable openvpn@bonding${i}.service >/dev/null 2>&1 || true
+			systemctl stop openvpn@bonding${i}.service >/dev/null 2>&1 || true
+			rm -f /etc/openvpn/bonding${i}.conf
+		done
+	fi
 fi
 
 echo 'Glorytun UDP'
@@ -996,7 +1013,7 @@ if [ "$DSVPN" = "yes" ]; then
 		git clone https://github.com/jedisct1/dsvpn.git /tmp/dsvpn
 		cd /tmp/dsvpn
 		git checkout ${DSVPN_VERSION}
-		wget https://github.com/Ysurac/openmptcprouter-feeds/raw/develop/dsvpn/patches/nofirewall.patch
+		wget "${OMR_FEEDS_BASE_URL}/dsvpn/patches/nofirewall.patch"
 		patch -p1 < nofirewall.patch
 		make CFLAGS='-DNO_DEFAULT_ROUTES -DNO_DEFAULT_FIREWALL'
 		make install
