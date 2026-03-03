@@ -72,3 +72,20 @@ It shows:
 - per-VPN service state
 - whether a VPN peer is currently reachable
 - detected active peer endpoints when present
+
+## Patched client images
+
+The `0.62.1-3KTEST` client images used with this VPS branch include these patches:
+
+- scheduler/CC sync fix in `openmptcprouter-vps` client init script
+- `opkg`/`apk` feed regeneration pinned to the original `v0.62` feed paths
+- tracker fixes for route recovery and state handling (`defaultgw`, IPv6 route lookup, `multipath` fallback, typo fixes, MTU helper cleanup)
+- `omr-test-speed` updated to use repo-managed host lists first
+- primary speed-test host lists now prefer `repoomr.3klab.com` plus Hetzner and Clouvider endpoints
+
+Artifacts prepared locally for this client build:
+
+- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined.img.gz`
+- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined-efi.img.gz`
+- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined.ova`
+- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined-efi.ova`
