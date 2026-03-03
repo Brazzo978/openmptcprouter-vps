@@ -2028,11 +2028,11 @@ _check_tun_ready() {
 	done
 	return 1
 }
+GLORYTUN_TUN_READY="yes"
 if [ "$GLORYTUN_UDP" = "yes" ] || [ "$GLORYTUN_TCP" = "yes" ]; then
 	if ! _check_tun_ready; then
-		echo "No working /dev/net/tun after retries: disable Glorytun UDP/TCP."
-		GLORYTUN_UDP="no"
-		GLORYTUN_TCP="no"
+		echo "No working /dev/net/tun after retries: install Glorytun now, defer service start."
+		GLORYTUN_TUN_READY="no"
 	fi
 fi
 # Install Glorytun UDP
@@ -2692,14 +2692,22 @@ else
 		echo 'done'
 	fi
 	if [ "$GLORYTUN_TCP" = "yes" ]; then
-		echo 'Restarting glorytun tcp...'
-		systemctl -q start glorytun-tcp@tun0 || true
-		systemctl -q restart 'glorytun-tcp@*' || true
+		if [ "$GLORYTUN_TUN_READY" = "yes" ]; then
+			echo 'Restarting glorytun tcp...'
+			systemctl -q start glorytun-tcp@tun0 || true
+			systemctl -q restart 'glorytun-tcp@*' || true
+		else
+			echo 'Skipping glorytun tcp start: /dev/net/tun was not ready during install'
+		fi
 	fi
 	if [ "$GLORYTUN_UDP" = "yes" ]; then
-		systemctl -q start glorytun-udp@tun0 || true
-		systemctl -q restart 'glorytun-udp@*' || true
-		echo 'done'
+		if [ "$GLORYTUN_TUN_READY" = "yes" ]; then
+			systemctl -q start glorytun-udp@tun0 || true
+			systemctl -q restart 'glorytun-udp@*' || true
+			echo 'done'
+		else
+			echo 'Skipping glorytun udp start: /dev/net/tun was not ready during install'
+		fi
 	fi
 	echo 'Restarting omr6in4...'
 	systemctl -q start omr6in4@user0 || true
