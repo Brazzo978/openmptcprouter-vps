@@ -53,3 +53,22 @@ cat /proc/sys/net/mptcp/available_schedulers
 cat /proc/sys/net/ipv4/tcp_congestion_control
 systemctl --no-pager --full status mptcp-bpf-schedulers.service omr-mptcp-compat.timer
 ```
+
+## Built-in health check
+
+The installer also installs `omr-check` automatically in `/usr/bin/omr-check`.
+
+You can run it directly:
+
+```bash
+omr-check
+```
+
+It shows:
+
+- current MPTCP scheduler on the VPS
+- current TCP congestion control
+- which VPN is currently in use
+- per-VPN service state
+- whether a VPN peer is currently reachable
+- detected active peer endpoints when present
