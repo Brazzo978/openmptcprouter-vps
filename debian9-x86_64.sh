@@ -1016,6 +1016,59 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	jq '. + {host: "0.0.0.0"}' /etc/openmptcprouter-vps-admin/omr-admin-config.json > /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp
 	mv /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp /etc/openmptcprouter-vps-admin/omr-admin-config.json
 
+	python3 - <<'PY'
+from pathlib import Path
+
+config_old = """    elif path.exists('/proc/sys/net/mptcp/enabled'):
+        mptcp_enabled = os.popen('sysctl -n net.mptcp.enabled').read().rstrip()
+        mptcp_checksum = os.popen('sysctl -n net.mptcp.checksum_enabled').read().rstrip()
+        mptcp_version = '1'
+"""
+config_new = """    elif path.exists('/proc/sys/net/mptcp/enabled'):
+        mptcp_enabled = os.popen('sysctl -n net.mptcp.enabled').read().rstrip()
+        mptcp_checksum = os.popen('sysctl -n net.mptcp.checksum_enabled').read().rstrip()
+        mptcp_pm_type = os.popen('sysctl -n net.mptcp.pm_type').read().rstrip()
+        mptcp_path_manager = 'userspace' if mptcp_pm_type == '1' else 'fullmesh'
+        mptcp_scheduler = os.popen('sysctl -n net.mptcp.scheduler').read().rstrip()
+        if mptcp_scheduler.startswith('bpf_'):
+            mptcp_scheduler = 'mptcp_' + mptcp_scheduler + '.o'
+        mptcp_syn_retries = os.popen('sysctl -n net.ipv4.tcp_syn_retries').read().rstrip()
+        mptcp_version = '1'
+"""
+mptcp_old = """    else:
+        os.system('sysctl -qw net.mptcp.checksum_enabled=' + checksum)
+"""
+mptcp_new = """    else:
+        os.system('sysctl -qw net.mptcp.checksum_enabled=' + checksum)
+        if path_manager in ('userspace', 'user', 'netlink'):
+            os.system('sysctl -qw net.mptcp.pm_type=1')
+        else:
+            os.system('sysctl -qw net.mptcp.pm_type=0')
+        scheduler_runtime = scheduler
+        if scheduler_runtime.endswith('.o'):
+            scheduler_runtime = scheduler_runtime[:-2]
+        if scheduler_runtime.startswith('mptcp_bpf_'):
+            scheduler_runtime = 'bpf_' + scheduler_runtime[10:]
+        elif scheduler_runtime.startswith('mptcp_'):
+            scheduler_runtime = scheduler_runtime[6:]
+        os.system('sysctl -qw net.mptcp.scheduler=' + scheduler_runtime)
+        os.system('sysctl -qw net.ipv4.tcp_syn_retries=' + str(syn_retries))
+"""
+
+for target in (Path('/usr/local/bin/omr-admin.py'), Path('/usr/bin/omr-admin.py')):
+    if not target.exists():
+        continue
+    data = target.read_text()
+    updated = data
+    if config_old in updated:
+        updated = updated.replace(config_old, config_new, 1)
+    if mptcp_old in updated:
+        updated = updated.replace(mptcp_old, mptcp_new, 1)
+    if updated != data:
+        target.write_text(updated)
+PY
+
+
 	chmod 644 /lib/systemd/system/omr-admin.service
 	#chmod 644 /lib/systemd/system/omr-admin-ipv6.service
 	#[ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /usr/local/bin/omr-admin.py
