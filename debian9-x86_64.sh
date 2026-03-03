@@ -2049,6 +2049,15 @@ if [ "$GLORYTUN_UDP" = "yes" ]; then
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
 		rm -f /usr/bin/glorytun
+		if [ "$ID" = "debian" ]; then
+			if [ "$VERSION_ID" = "9" ]; then
+				apt -t stretch-backports -y install libsodium-dev
+			else
+				apt-get -y install libsodium-dev || true
+			fi
+		elif [ "$ID" = "ubuntu" ]; then
+			apt-get -y install libsodium-dev
+		fi
 		apt-get install -y --no-install-recommends build-essential git ca-certificates meson pkg-config
 		rm -rf /tmp/glorytun-udp
 		cd /tmp
