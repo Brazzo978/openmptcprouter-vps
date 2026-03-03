@@ -1345,11 +1345,13 @@ fi
 if [ "$LOCALFILES" = "no" ]; then
 	wget -O /lib/systemd/system/omr-update.service ${VPS_CONFIG_URL}${VPSPATH}/omr-update.service.in
 	wget -O /usr/bin/omr-update ${VPS_CONFIG_URL}${VPSPATH}/omr-update
-	chmod 755 /usr/bin/omr-update
+	wget -O /usr/bin/omr-check ${VPS_CONFIG_URL}${VPSPATH}/omr-check
+	chmod 755 /usr/bin/omr-update /usr/bin/omr-check
 else
 	cp ${DIR}/omr-update.service.in /lib/systemd/system/omr-update.service
 	cp ${DIR}/omr-update /usr/bin/omr-update
-	chmod 755 /usr/bin/omr-update
+	cp ${DIR}/omr-check /usr/bin/omr-check
+	chmod 755 /usr/bin/omr-update /usr/bin/omr-check
 fi
 chmod 644 /lib/systemd/system/omr-update.service
 

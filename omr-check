@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -u
+
+get_sysctl() {
+    sysctl -n "$1" 2>/dev/null | tr -d '\n'
+}
+
+normalize_endpoint() {
+    sed -E 's/^\[::ffff:([^]]+)\]/\1/; s/^\[([^]]+)\]/\1/'
+}
+
+collect_tcp_peers() {
+    local port="$1"
+    local proc="$2"
+    ss -Htnp 2>/dev/null \
+        | awk -v port=":${port}" '($4 ~ port || $5 ~ port) { print $0 }' \
+        | grep -F "$proc" 2>/dev/null \
+        | awk '{print $5}' \
+        | normalize_endpoint \
+        | sort -u
+}
+
+collect_udp_peers() {
+    local port="$1"
+    local proc="$2"
+    ss -Huanp 2>/dev/null \
+        | awk -v port=":${port}" '($4 ~ port || $5 ~ port) && $5 != "*:*" { print $0 }' \
+        | grep -F "$proc" 2>/dev/null \
+        | awk '{print $5}' \
+        | normalize_endpoint \
+        | sort -u
+}
+
+service_state() {
+    local unit="$1"
+    if systemctl -q is-active "$unit" 2>/dev/null; then
+        printf 'active'
+    elif systemctl -q is-enabled "$unit" 2>/dev/null; then
+        printf 'enabled'
+    else
+        printf 'inactive'
+    fi
+}
+
+print_vpn_status() {
+    local name="$1"
+    local unit="$2"
+    local iface="$3"
+    local peers="$4"
+    local state
+    state="$(service_state "$unit")"
+
+    printf '%-14s state=%-8s iface=%-10s peer_reachable=%s\n' \
+        "$name" "$state" "$iface" "$([ -n "$peers" ] && echo yes || echo no)"
+
+    if [ -n "$peers" ]; then
+        printf '  peers: %s\n' "$(echo "$peers" | paste -sd ',' - | sed 's/,/, /g')"
+    fi
+}
+
+scheduler="$(get_sysctl net.mptcp.scheduler)"
+[ -z "$scheduler" ] && scheduler="$(get_sysctl net.mptcp.mptcp_scheduler)"
+[ -z "$scheduler" ] && scheduler="unknown"
+
+cc="$(get_sysctl net.ipv4.tcp_congestion_control)"
+[ -z "$cc" ] && cc="unknown"
+
+gt_tcp_peers="$(collect_tcp_peers 65001 glorytun-tcp || true)"
+gt_udp_peers="$(collect_udp_peers 5000 glorytun || true)"
+ovpn_tcp_peers="$(collect_tcp_peers 65301 openvpn || true)"
+ovpn_udp_peers="$(collect_udp_peers 65301 openvpn || true)"
+mlvpn_peers="$(ss -Htnp 2>/dev/null | grep -F mlvpn 2>/dev/null | awk '{print $5}' | normalize_endpoint | sort -u || true)"
+dsvpn_peers="$(ss -Huanp 2>/dev/null | grep -F dsvpn 2>/dev/null | awk '$5 != "*:*" {print $5}' | normalize_endpoint | sort -u || true)"
+
+current_vpns=()
+[ -n "$gt_tcp_peers" ] && current_vpns+=("glorytun_tcp")
+[ -n "$gt_udp_peers" ] && current_vpns+=("glorytun_udp")
+[ -n "$ovpn_tcp_peers" ] && current_vpns+=("openvpn_tcp")
+[ -n "$ovpn_udp_peers" ] && current_vpns+=("openvpn_udp")
+[ -n "$mlvpn_peers" ] && current_vpns+=("mlvpn")
+[ -n "$dsvpn_peers" ] && current_vpns+=("dsvpn")
+
+printf 'MPTCP scheduler: %s\n' "$scheduler"
+printf 'TCP congestion: %s\n' "$cc"
+if [ ${#current_vpns[@]} -gt 0 ]; then
+    printf 'VPN in use now: %s\n' "$(IFS=', '; echo "${current_vpns[*]}")"
+else
+    printf 'VPN in use now: none detected\n'
+fi
+printf '\nVPN status:\n'
+print_vpn_status 'glorytun_tcp' 'glorytun-tcp@tun0.service' 'gt-tun0' "$gt_tcp_peers"
+print_vpn_status 'glorytun_udp' 'glorytun-udp@tun0.service' 'gt-udp-tun0' "$gt_udp_peers"
+print_vpn_status 'openvpn_tcp' 'openvpn@tun0.service' 'tun0' "$ovpn_tcp_peers"
+print_vpn_status 'openvpn_udp' 'openvpn@tun1.service' 'tun1' "$ovpn_udp_peers"
+print_vpn_status 'mlvpn' 'mlvpn@mlvpn0.service' 'mlvpn0' "$mlvpn_peers"
+print_vpn_status 'dsvpn' 'dsvpn.service' 'dsvpn0' "$dsvpn_peers"
