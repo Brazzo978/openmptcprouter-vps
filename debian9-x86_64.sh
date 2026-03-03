@@ -1355,6 +1355,29 @@ else
 fi
 chmod 644 /lib/systemd/system/omr-update.service
 
+mkdir -p /etc/modules-load.d
+cat > /etc/modules-load.d/omr-tcp-cc.conf <<-EOF
+tcp_bic
+tcp_cdg
+tcp_cubic
+tcp_dctcp
+tcp_highspeed
+tcp_hstcp
+tcp_htcp
+tcp_hybla
+tcp_illinois
+tcp_lp
+tcp_nv
+tcp_scalable
+tcp_vegas
+tcp_veno
+tcp_westwood
+tcp_yeah
+EOF
+for module in $(cat /etc/modules-load.d/omr-tcp-cc.conf); do
+	modprobe ${module} >/dev/null 2>&1 || true
+done
+
 # Install simple-obfs
 if [ "$OBFS" = "yes" ]; then
 	echo "Install OBFS"
