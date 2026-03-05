@@ -1,6 +1,6 @@
 # OpenMPTCProuter VPS scripts (omr-vps-0.1048-def)
 
-This is the VPS part of OpenMPTCProuter, with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
+This is the VPS part of OpenMPTCProuter, with my edits and custom repo and installation file.
 
 ## Requirements
 
@@ -21,38 +21,19 @@ curl -fsSL \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
-# set your domain/FQDN used by OMR
-VPS_DOMAIN=vps.example.com KERNEL=6.12 /root/debian9-x86_64.sh
+KERNEL=6.12 /root/debian9-x86_64.sh
+
+# or if you want to set your domain/FQDN used by OMR for some obfuscation / weird proxy stuff
+VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 ```
 
-## Update an existing VPS
+## What did i edit
 
-```bash
-cd /root
-rm -f /root/debian9-x86_64.sh
-curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
-  -o /root/debian9-x86_64.sh
-chmod +x /root/debian9-x86_64.sh
-
-update=1 KERNEL=6.12 /root/debian9-x86_64.sh
-```
-
-## What this branch adds
-
-- Uses your fork namespace (`Brazzo978`) by default.
-- Uses `repoomr.3klab.com` for packages/artifacts.
-- Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`).
-- Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler`.
-
-## Post-install checks
-
-```bash
-uname -r
-cat /proc/sys/net/mptcp/available_schedulers
-cat /proc/sys/net/ipv4/tcp_congestion_control
-systemctl --no-pager --full status mptcp-bpf-schedulers.service omr-mptcp-compat.timer
-```
+- Uses my repo for packages/artifacts.
+- Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`) needed for scheduler and CC sync from client to vps.
+- Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler` Custom kernel based on the default one ,recompiled kernel with bpf support on the vps side.
+- Removed legacy and newer stull that only makes confusion
+- fixed glorytun tcp/udp on debian 13 (now forced to use deb13)
 
 ## Built-in health check
 
@@ -81,11 +62,5 @@ The `0.62.1-3KTEST` client images used with this VPS branch include these patche
 - `opkg`/`apk` feed regeneration pinned to the original `v0.62` feed paths
 - tracker fixes for route recovery and state handling (`defaultgw`, IPv6 route lookup, `multipath` fallback, typo fixes, MTU helper cleanup)
 - `omr-test-speed` updated to use repo-managed host lists first
-- primary speed-test host lists now prefer `repoomr.3klab.com` plus Hetzner and Clouvider endpoints
-
-Artifacts prepared locally for this client build:
-
-- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined.img.gz`
-- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined-efi.img.gz`
-- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined.ova`
-- `openmptcprouter-v0.62.1-3KTEST-6.6-r0+28431-92e020b50f-x86-64-generic-ext4-combined-efi.ova`
+- primary speed-test host lists now prefer local italian repo , Hetzner and Clouvider endpoints
+- AND A LOT, LOT , LOT, LOT , LOT of more fixes will provide a changelog later.
