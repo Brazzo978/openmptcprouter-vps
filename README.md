@@ -1,4 +1,4 @@
-# OpenMPTCProuter VPS scripts (omr-vps-0.1048-def)
+# OpenMPTCProuter VPS scripts (omr-vps-0.1049-def)
 
 This is the VPS part of OpenMPTCProuter, with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
 
@@ -17,7 +17,7 @@ apt-get update
 apt-get install -y curl ca-certificates
 
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1049-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
@@ -31,7 +31,7 @@ VPS_DOMAIN=vps.example.com KERNEL=6.12 /root/debian9-x86_64.sh
 cd /root
 rm -f /root/debian9-x86_64.sh
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1049-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 

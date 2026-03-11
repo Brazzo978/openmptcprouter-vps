@@ -1,6 +1,6 @@
 # Client 0.62 Failover And Master Selection Notes
 
-This note documents the client-side WAN failover logic observed in the `0.62 / 6.6` images used with the `omr-vps-0.1048-def` server stack.
+This note documents the client-side WAN failover logic observed in the `0.62 / 6.6` images used with the `omr-vps-0.1049-def` server stack.
 
 ## Scope
 

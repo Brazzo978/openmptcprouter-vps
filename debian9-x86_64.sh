@@ -106,7 +106,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1048-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1049-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -131,7 +131,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1048-3KTest"
+OMR_VERSION="0.1049-3KTest"
 
 DIR=$( pwd )
 #"
