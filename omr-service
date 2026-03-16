@@ -22,6 +22,10 @@ _multipath() {
 _glorytun_udp() {
 	#if [ -n "$(systemctl -a | grep 'glorytun-udp')" ]; then
 	if systemctl list-unit-files glorytun-udp@.service >/dev/null; then
+		# Keep UDP health checks strictly tied to UDP mode to avoid
+		# unnecessary restarts while another VPN mode is active.
+		[ -f /etc/openmptcprouter-vps-admin/current-vpn ] || return
+		[ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "glorytun_udp" ] || return
 		[ -z "$(glorytun show dev gt-udp-tun0 2>/dev/null | grep tunnel)" ] && {
 			logger -t "OMR-Service" "Restart Glorytun-UDP"
 			systemctl -q restart 'glorytun-udp@*'
@@ -43,13 +47,29 @@ _glorytun_tcp() {
 			[ "$(echo $intf | grep key)" = "" ] && timeout 10 /etc/glorytun-tcp/post.sh ${intf}
 		done
 		if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "glorytun_tcp" ]; then
+			fail_file="/run/omr-glorytun-tcp-fail.count"
 			localip="$(cat /etc/glorytun-tcp/tun0 | grep LOCALIP | cut -d '=' -f2)"
 			[ -z "$localip" ] && localip="10.255.255.1"
 			remoteip="$(echo $localip | sed 's/\.1/\.2/')"
-			if [ "$(ping -c 6 -w 50 $remoteip | grep '100%')" != "" ] && ([ -z "$(pgrep glorytun-tcp)" ] || [ "$(expr $(date +%s) - $(stat -c %Y /proc/$(pgrep glorytun-tcp)/exe ))" -gt "600" ]); then
-				logger -t "OMR-Service" "No answer from VPN client end, restart Glorytun-TCP"
-				systemctl restart glorytun-tcp@tun0
-				sleep 10
+			pid="$(pgrep -x glorytun-tcp | head -n1)"
+			pid_age=0
+			[ -n "$pid" ] && pid_age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+			[ -z "$pid_age" ] && pid_age=0
+			fails=0
+			[ -f "$fail_file" ] && fails="$(cat "$fail_file" 2>/dev/null)"
+			[ -z "$fails" ] && fails=0
+
+			if ping -I gt-tun0 -c 3 -W 2 "$remoteip" >/dev/null 2>&1; then
+				echo 0 > "$fail_file"
+			else
+				fails=$((fails+1))
+				echo "$fails" > "$fail_file"
+				if { [ -z "$pid" ] && [ "$fails" -ge 2 ]; } || { [ -n "$pid" ] && [ "$pid_age" -ge 180 ] && [ "$fails" -ge 3 ]; }; then
+					logger -t "OMR-Service" "No answer from VPN client end ($fails failed probes, pid_age=${pid_age}s), restart Glorytun-TCP"
+					systemctl restart glorytun-tcp@tun0
+					echo 0 > "$fail_file"
+					sleep 10
+				fi
 			fi
 		fi
 		#ip link set mtu 9000 dev gt-tun0 >/dev/null 2>&1
@@ -61,12 +81,27 @@ _dsvpn() {
 	if systemctl list-unit-files dsvpn-server@.service >/dev/null; then
 		[ -n "$(ip -6 r show 64:ff9b::/96 dev dsvpn0)" ] && ip -6 r del 64:ff9b::/96 dev dsvpn0 >/dev/null 2>&1
 		if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "dsvpn" ]; then
+			fail_file="/run/omr-dsvpn-fail.count"
 			localip="$(cat /etc/dsvpn/dsvpn0 | grep LOCALTUNIP | cut -d '=' -f2)"
 			[ -z "$localip" ] && localip="10.255.251.1"
 			remoteip="$(echo $localip | sed 's/\.1/\.2/')"
-			if [ "$(ping -c 5 -w 5 $remoteip | grep '100%')" != "" ] && [ "$(expr $(date +%s) - $(stat -c %Y /proc/$(pgrep dsvpn)/exe ))" -gt "300" ]; then
-				logger -t "OMR-Service" "No answer from VPN client end, restart DSVPN"
-				systemctl restart dsvpn-server@dsvpn0
+			pid="$(pgrep -x dsvpn | head -n1)"
+			pid_age=0
+			[ -n "$pid" ] && pid_age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+			[ -z "$pid_age" ] && pid_age=0
+			fails=0
+			[ -f "$fail_file" ] && fails="$(cat "$fail_file" 2>/dev/null)"
+			[ -z "$fails" ] && fails=0
+			if ping -I dsvpn0 -c 3 -W 2 "$remoteip" >/dev/null 2>&1; then
+				echo 0 > "$fail_file"
+			else
+				fails=$((fails+1))
+				echo "$fails" > "$fail_file"
+				if { [ -z "$pid" ] && [ "$fails" -ge 2 ]; } || { [ -n "$pid" ] && [ "$pid_age" -ge 180 ] && [ "$fails" -ge 3 ]; }; then
+					logger -t "OMR-Service" "No answer from VPN client end ($fails failed probes, pid_age=${pid_age}s), restart DSVPN"
+					systemctl restart dsvpn-server@dsvpn0
+					echo 0 > "$fail_file"
+				fi
 			fi
 			#ip link set mtu 9000 dev dsvpn0 >/dev/null 2>&1
 		fi
