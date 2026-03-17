@@ -133,6 +133,7 @@ CHINA=${CHINA:-yes}
 
 OMR_VERSION="0.1150-3KTest"
 GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
+GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
 DIR=$( pwd )
 #"
@@ -1361,6 +1362,8 @@ chmod 755 /usr/local/sbin/gtun-swap
 ln -sf /usr/local/sbin/gtun-swap /usr/bin/gtun-swap
 mkdir -p /usr/local/lib/gtun-swap
 [ -x /usr/local/bin/glorytun-tcp ] && cp -f /usr/local/bin/glorytun-tcp /usr/local/lib/gtun-swap/glorytun-tcp.original
+[ "$GTUN_TCP_OMRDEV5_PACKAGE" = "yes" ] && apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install omr-glorytun-tcp-omrdev5 >/dev/null 2>&1 || true
+[ -f /usr/lib/gtun-swap/glorytun-tcp.omrdev5 ] && cp -f /usr/lib/gtun-swap/glorytun-tcp.omrdev5 /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
 [ -f "${DIR}/bin/glorytun-tcp.omrdev5" ] && cp -f "${DIR}/bin/glorytun-tcp.omrdev5" /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
 [ -n "$GTUN_TCP_OMRDEV5_URL" ] && wget -O /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 "$GTUN_TCP_OMRDEV5_URL"
 [ -f /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 ] && chmod 755 /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5

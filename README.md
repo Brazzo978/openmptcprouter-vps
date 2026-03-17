@@ -86,6 +86,8 @@ Optional custom binary slot:
 
 - `/usr/local/lib/gtun-swap/glorytun-tcp.omrdev5`
 
+On `0.1150`, installer also tries to install `omr-glorytun-tcp-omrdev5` from your APT repo and auto-populates the slot.
+
 Usage:
 
 ```bash
