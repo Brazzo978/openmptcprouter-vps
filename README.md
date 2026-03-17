@@ -1,4 +1,4 @@
-# OpenMPTCProuter VPS scripts (omr-vps-0.1049-def)
+# OpenMPTCProuter VPS scripts (omr-vps-0.1150-def)
 
 This is the VPS part of OpenMPTCProuter, with defaults moved to the `Brazzo978` namespace and `repoomr.3klab.com`.
 
@@ -17,7 +17,7 @@ apt-get update
 apt-get install -y curl ca-certificates
 
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1049-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1150-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
@@ -31,7 +31,7 @@ VPS_DOMAIN=vps.example.com KERNEL=6.12 /root/debian9-x86_64.sh
 cd /root
 rm -f /root/debian9-x86_64.sh
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1049-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1150-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
@@ -44,6 +44,7 @@ update=1 KERNEL=6.12 /root/debian9-x86_64.sh
 - Uses `repoomr.3klab.com` for packages/artifacts.
 - Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`).
 - Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler`.
+- Installs `gtun-swap` for post-install Glorytun TCP binary swap tests.
 
 ## Post-install checks
 
@@ -72,6 +73,27 @@ It shows:
 - per-VPN service state
 - whether a VPN peer is currently reachable
 - detected active peer endpoints when present
+
+## Glorytun swap helper
+
+`gtun-swap` is installed automatically on the VPS (`/usr/bin/gtun-swap`).
+
+It snapshots the current `glorytun-tcp` binary to:
+
+- `/usr/local/lib/gtun-swap/glorytun-tcp.original`
+
+Optional custom binary slot:
+
+- `/usr/local/lib/gtun-swap/glorytun-tcp.omrdev5`
+
+Usage:
+
+```bash
+gtun-swap status
+gtun-swap import /root/glorytun-2.0.0-omrdev5-linux-glibc
+gtun-swap omrdev5
+gtun-swap orig
+```
 
 ## Patched client images
 

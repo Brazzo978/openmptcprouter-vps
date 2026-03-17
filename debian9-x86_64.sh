@@ -106,7 +106,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1049-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1150-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -131,7 +131,8 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1049-3KTest"
+OMR_VERSION="0.1150-3KTest"
+GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
 
 DIR=$( pwd )
 #"
@@ -1346,14 +1347,23 @@ if [ "$LOCALFILES" = "no" ]; then
 	wget -O /lib/systemd/system/omr-update.service ${VPS_CONFIG_URL}${VPSPATH}/omr-update.service.in
 	wget -O /usr/bin/omr-update ${VPS_CONFIG_URL}${VPSPATH}/omr-update
 	wget -O /usr/bin/omr-check ${VPS_CONFIG_URL}${VPSPATH}/omr-check
+	wget -O /usr/local/sbin/gtun-swap ${VPS_CONFIG_URL}${VPSPATH}/gtun-swap
 	chmod 755 /usr/bin/omr-update /usr/bin/omr-check
 else
 	cp ${DIR}/omr-update.service.in /lib/systemd/system/omr-update.service
 	cp ${DIR}/omr-update /usr/bin/omr-update
 	cp ${DIR}/omr-check /usr/bin/omr-check
+	cp ${DIR}/gtun-swap /usr/local/sbin/gtun-swap
 	chmod 755 /usr/bin/omr-update /usr/bin/omr-check
 fi
 chmod 644 /lib/systemd/system/omr-update.service
+chmod 755 /usr/local/sbin/gtun-swap
+ln -sf /usr/local/sbin/gtun-swap /usr/bin/gtun-swap
+mkdir -p /usr/local/lib/gtun-swap
+[ -x /usr/local/bin/glorytun-tcp ] && cp -f /usr/local/bin/glorytun-tcp /usr/local/lib/gtun-swap/glorytun-tcp.original
+[ -f "${DIR}/bin/glorytun-tcp.omrdev5" ] && cp -f "${DIR}/bin/glorytun-tcp.omrdev5" /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
+[ -n "$GTUN_TCP_OMRDEV5_URL" ] && wget -O /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 "$GTUN_TCP_OMRDEV5_URL"
+[ -f /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 ] && chmod 755 /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
 
 mkdir -p /etc/modules-load.d
 cat > /etc/modules-load.d/omr-tcp-cc.conf <<-EOF

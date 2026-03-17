@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET="/usr/local/bin/glorytun-tcp"
+STORE="/usr/local/lib/gtun-swap"
+ORIG_BIN="${STORE}/glorytun-tcp.original"
+OMRDEV5_BIN="${STORE}/glorytun-tcp.omrdev5"
+
+usage() {
+	echo "Usage: gtun-swap {status|orig|omrdev5|import <path>}" >&2
+	exit 1
+}
+
+ensure_store() {
+	mkdir -p "${STORE}"
+	if [ -x "${TARGET}" ] && [ ! -f "${ORIG_BIN}" ]; then
+		install -m 0755 "${TARGET}" "${ORIG_BIN}"
+	fi
+}
+
+sha_or_na() {
+	local file="$1"
+	if [ -f "${file}" ]; then
+		sha256sum "${file}" | awk '{print $1}'
+	else
+		echo "missing"
+	fi
+}
+
+restart_glorytun_units() {
+	local unit restarted=0
+	while read -r unit; do
+		[ -n "${unit}" ] || continue
+		systemctl restart "${unit}"
+		echo "restarted: ${unit}"
+		restarted=1
+	done < <(systemctl list-units --type=service --state=active --no-legend --plain 'glorytun-tcp@*.service' | awk '{print $1}')
+
+	if [ "${restarted}" -eq 0 ] && systemctl list-unit-files --type=service | awk '{print $1}' | grep -q '^glorytun-tcp@tun0\.service$'; then
+		systemctl restart glorytun-tcp@tun0.service || true
+	fi
+}
+
+apply_bin() {
+	local src="$1"
+	local label="$2"
+	[ -f "${src}" ] || {
+		echo "Missing binary: ${src}" >&2
+		echo "Tip: put your custom binary at ${OMRDEV5_BIN} or run: gtun-swap import /path/to/glorytun-tcp" >&2
+		exit 2
+	}
+	install -m 0755 "${src}" "${TARGET}"
+	restart_glorytun_units
+	echo "active=${label} sha=$(sha_or_na "${TARGET}")"
+}
+
+status() {
+	local target_sha orig_sha omr_sha profile
+	target_sha=$(sha_or_na "${TARGET}")
+	orig_sha=$(sha_or_na "${ORIG_BIN}")
+	omr_sha=$(sha_or_na "${OMRDEV5_BIN}")
+	profile="custom"
+	if [ "${target_sha}" = "${orig_sha}" ] && [ "${target_sha}" != "missing" ]; then
+		profile="orig"
+	elif [ "${target_sha}" = "${omr_sha}" ] && [ "${target_sha}" != "missing" ]; then
+		profile="omrdev5"
+	fi
+	echo "profile=${profile}"
+	echo "target_sha=${target_sha}"
+	echo "orig_sha=${orig_sha}"
+	echo "omrdev5_sha=${omr_sha}"
+	pgrep -fa 'glorytun-tcp .*tun0' || true
+}
+
+import_omrdev5() {
+	local src="${1:-}"
+	[ -n "${src}" ] || usage
+	[ -f "${src}" ] || {
+		echo "File not found: ${src}" >&2
+		exit 2
+	}
+	install -m 0755 "${src}" "${OMRDEV5_BIN}"
+	echo "imported=${OMRDEV5_BIN} sha=$(sha_or_na "${OMRDEV5_BIN}")"
+}
+
+ensure_store
+
+case "${1:-status}" in
+	status)
+		status
+		;;
+	orig|original)
+		apply_bin "${ORIG_BIN}" "orig"
+		;;
+	omrdev5|omr)
+		apply_bin "${OMRDEV5_BIN}" "omrdev5"
+		;;
+	import)
+		shift
+		import_omrdev5 "${1:-}"
+		;;
+	*)
+		usage
+		;;
+esac
