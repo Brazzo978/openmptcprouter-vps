@@ -2489,6 +2489,14 @@ else
 	sed -i 's/^.*#DNAT/#DNAT/g' /etc/shorewall/rules
 	sed -i 's:10.0.0.2:$OMR_ADDR:g' /etc/shorewall/rules
 	sed -i "s:eth0:$INTERFACE6:g" /etc/shorewall6/*
+	# WireGuard client access profile (client-wg0 / 10.255.246.0/24):
+	# allow vpncl -> net and ensure SNAT exists for this subnet.
+	if ! grep -Eq '^vpncl[[:space:]]+net[[:space:]]+ACCEPT' /etc/shorewall/policy; then
+		echo "vpncl		net		ACCEPT" >> /etc/shorewall/policy
+	fi
+	if ! grep -q '10.255.246.0/24' /etc/shorewall/snat; then
+		echo "MASQUERADE		10.255.246.0/24		\$NET_IFACE" >> /etc/shorewall/snat
+	fi
 	if [ "$LOCALFILES" = "no" ]; then
 		rm -rf ${DIR}/shorewall4
 		rm -rf ${DIR}/shorewall6
