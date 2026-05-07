@@ -86,7 +86,7 @@ MLVPN_BINARY_VERSION="3.0.0+20211028.git.ddafba3"
 UBOND_VERSION="31af0f69ebb6d07ed9348dca2fced33b956cedee"
 OBFS_VERSION="486bebd9208539058e57e23a12f23103016e09b4"
 OBFS_BINARY_VERSION="0.0.5-1"
-OMR_ADMIN_VERSION="ccac898d295e5c0d74229d66f0eb04c9f051349d"
+OMR_ADMIN_VERSION="239cbbf9043b6d629f150d9f177412350ec9f06e"
 OMR_ADMIN_BINARY_VERSION="0.16+20260113"
 #OMR_ADMIN_BINARY_VERSION="0.3+20220827"
 DSVPN_VERSION="3b99d2ef6c02b2ef68b5784bec8adfdd55b29b1a"
@@ -106,7 +106,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1150-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1151-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -131,7 +131,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1150-3KTest"
+OMR_VERSION="0.1151-def"
 GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
 GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
@@ -1056,6 +1056,11 @@ mptcp_new = """    else:
         os.system('sysctl -qw net.mptcp.scheduler=' + scheduler_runtime)
         os.system('sysctl -qw net.ipv4.tcp_syn_retries=' + str(syn_retries))
 """
+xray_old = """            routing = {'type': 'field','inboundTag': [tag], 'outboundTag': 'OMRLan'}
+"""
+xray_new = """            routing = {'type': 'field','inboundTag': [tag], 'outboundTag': 'direct'}
+"""
+xray_marker = "def xray_add_port(user, port, proto, name, destip, destport):"
 
 for target in (Path('/usr/local/bin/omr-admin.py'), Path('/usr/bin/omr-admin.py')):
     if not target.exists():
@@ -1066,6 +1071,12 @@ for target in (Path('/usr/local/bin/omr-admin.py'), Path('/usr/bin/omr-admin.py'
         updated = updated.replace(config_old, config_new, 1)
     if mptcp_old in updated:
         updated = updated.replace(mptcp_old, mptcp_new, 1)
+    marker_pos = updated.find(xray_marker)
+    if marker_pos != -1:
+        before = updated[:marker_pos]
+        after = updated[marker_pos:]
+        after = after.replace(xray_old, xray_new, 1)
+        updated = before + after
     if updated != data:
         target.write_text(updated)
 PY
