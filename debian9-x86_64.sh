@@ -119,7 +119,7 @@ OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
 OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://repoomr.3klab.com/openmptcprouter.gpg.key}
 OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
-OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-https://repoomr.3klab.com/debian/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}.zip}
+OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}.zip}
 MPTCPIZE_GIT_URL=${MPTCPIZE_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mptcpize.git}
 SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
 GLORYTUN_GIT_URL=${GLORYTUN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/glorytun.git}
@@ -972,23 +972,38 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 		wget -O /tmp/openmptcprouter-vps-admin.zip ${OMR_ADMIN_ARCHIVE_URL}
 		cd /tmp
 		unzip -q -o openmptcprouter-vps-admin.zip
-		cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
-		if [ -f /usr/local/bin/omr-admin.py ] || [ -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
+		OMR_ADMIN_SRC_DIR=""
+		for admin_dir in "/tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}" "/tmp/openmptcprouter-vps-admin"; do
+			[ -f "${admin_dir}/omr-admin.py" ] && OMR_ADMIN_SRC_DIR="${admin_dir}" && break
+		done
+		if [ -z "${OMR_ADMIN_SRC_DIR}" ]; then
+			OMR_ADMIN_SRC_DIR=$(find /tmp -maxdepth 1 -type d -name 'openmptcprouter-vps-admin*' -exec test -f '{}/omr-admin.py' \; -print | head -n 1)
+		fi
+		[ -z "${OMR_ADMIN_SRC_DIR}" ] && {
+			echo "Unable to find omr-admin.py in ${OMR_ADMIN_ARCHIVE_URL}" >&2
+			exit 8
+		}
+		install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/local/bin/omr-admin.py
+		install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/bin/omr-admin.py
+		if [ -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
 			OMR_ADMIN_PASS2=$(grep -Po '"'"pass"'"\s*:\s*"\K([^"]*)' /etc/openmptcprouter-vps-admin/omr-admin-config.json | tr -d  "\n")
 			[ -z "$OMR_ADMIN_PASS2" ] && OMR_ADMIN_PASS2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].openmptcprouter.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS2" ] && OMR_ADMIN_PASS=$OMR_ADMIN_PASS2
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		else
-			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
+			cp "${OMR_ADMIN_SRC_DIR}/omr-admin-config.json" /etc/openmptcprouter-vps-admin/
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/local/bin/omr-admin.py
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/bin/omr-admin.py
 			cd /etc/openmptcprouter-vps-admin
 		fi
-		if [ "$(grep user_password /etc/openmptcprouter-vps-admin/omr-admin-config.json)" = "" ]; then
-			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin-config.json /etc/openmptcprouter-vps-admin/
-			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
+		if [ -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ] && [ "$(grep user_password /etc/openmptcprouter-vps-admin/omr-admin-config.json)" = "" ]; then
+			cp "${OMR_ADMIN_SRC_DIR}/omr-admin-config.json" /etc/openmptcprouter-vps-admin/
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/local/bin/omr-admin.py
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/bin/omr-admin.py
 			cd /etc/openmptcprouter-vps-admin
 		fi
-		rm -rf /tmp/tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}
+		rm -rf /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION} /tmp/openmptcprouter-vps-admin
 		chmod u+x /usr/local/bin/omr-admin.py
 	else
 		if [ -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ]; then
@@ -1006,16 +1021,28 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 		#OMR_ADMIN_PASS_ADMIN=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 	fi
 	if [ -n "$OMR_ADMIN_ARCHIVE_URL" ]; then
-		rm -rf /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION} /tmp/openmptcprouter-vps-admin.zip
+		rm -rf /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION} /tmp/openmptcprouter-vps-admin /tmp/openmptcprouter-vps-admin.zip
 		wget -O /tmp/openmptcprouter-vps-admin.zip ${OMR_ADMIN_ARCHIVE_URL}
 		cd /tmp
 		unzip -q -o openmptcprouter-vps-admin.zip
-		if [ -f /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py ]; then
-			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
+		OMR_ADMIN_SRC_DIR=""
+		for admin_dir in "/tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}" "/tmp/openmptcprouter-vps-admin"; do
+			[ -f "${admin_dir}/omr-admin.py" ] && OMR_ADMIN_SRC_DIR="${admin_dir}" && break
+		done
+		if [ -z "${OMR_ADMIN_SRC_DIR}" ]; then
+			OMR_ADMIN_SRC_DIR=$(find /tmp -maxdepth 1 -type d -name 'openmptcprouter-vps-admin*' -exec test -f '{}/omr-admin.py' \; -print | head -n 1)
+		fi
+		[ -z "${OMR_ADMIN_SRC_DIR}" ] && {
+			echo "Unable to find omr-admin.py in ${OMR_ADMIN_ARCHIVE_URL}" >&2
+			exit 8
+		}
+		if [ -f "${OMR_ADMIN_SRC_DIR}/omr-admin.py" ]; then
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/local/bin/omr-admin.py
+			install -m 755 "${OMR_ADMIN_SRC_DIR}/omr-admin.py" /usr/bin/omr-admin.py
 			chmod u+x /usr/local/bin/omr-admin.py
 		fi
-		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ] && [ -f /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin-config.json ]; then
-			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin-config.json /etc/openmptcprouter-vps-admin/
+		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ] && [ -f "${OMR_ADMIN_SRC_DIR}/omr-admin-config.json" ]; then
+			cp "${OMR_ADMIN_SRC_DIR}/omr-admin-config.json" /etc/openmptcprouter-vps-admin/
 		fi
 	fi
 	if [ ! -f /etc/openmptcprouter-vps-admin/key.pem ]; then
