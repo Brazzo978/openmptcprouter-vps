@@ -2,7 +2,7 @@
 
 This is the VPS part of OpenMPTCProuter, with my edits and custom repo and installation file.
 
-This VPS release is intended for the `OpenMPTCProuter v0.62.10-3KTest` client release.
+This VPS release is intended for the `OpenMPTCProuter v0.62.10-3K` client release.
 Use `0.1153-def` with client `.10` when testing MQVPN and forced TCP port-forward over Xray reverse path.
 
 ## Requirements
@@ -32,11 +32,12 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 
 ## What did i edit
 
-- `0.1153-def` is compatible with client `v0.62.10-3KTest`.
+- `0.1153-def` is compatible with client `v0.62.10-3K`.
 - Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.
 - Pins the patched MQVPN server artifact with `[Routes]` support, required for VPS -> client LAN access over MQVPN.
 - Exposes MQVPN config through `omr-admin` so client `.10` can auto-sync key, port and tunnel IPs.
 - Supports client `.10` forced TCP port-forward over dedicated Xray reverse path.
+- Rejects forced Xray reverse TCP port-forward ranges with a clean API error; use one TCP source port per force-Xray rule.
 - Keeps UDP port-forward on the active VPN tunnel even when the client rule has the force-Xray flag enabled.
 - Preserves DNAT destination port for forwarded ports, e.g. public `2222` to router `22`.
 - Uses my repo for packages/artifacts.
@@ -68,7 +69,7 @@ It shows:
 
 ## Compatible client images
 
-The `v0.62.10-3KTest` client images used with this VPS branch include these patches:
+The `v0.62.10-3K` client images used with this VPS branch include these patches:
 
 - scheduler/CC sync fix in `openmptcprouter-vps` client init script
 - `opkg`/`apk` feed regeneration pinned to the original `v0.62` feed paths
@@ -77,6 +78,7 @@ The `v0.62.10-3KTest` client images used with this VPS branch include these patc
 - primary speed-test host lists now prefer local italian repo , Hetzner and Clouvider endpoints
 - MQVPN client integration with automatic key/config sync from VPS API
 - forced TCP port-forward over dedicated Xray reverse path
+- force-Xray range guard: one TCP source port per rule, range requests are rejected cleanly
 - UDP fallback to the active VPN tunnel when force-Xray is enabled on a mixed TCP/UDP rule
 - AND A LOT, LOT , LOT, LOT , LOT of more [Changelog](Vanilla-Changelog.md).
 
