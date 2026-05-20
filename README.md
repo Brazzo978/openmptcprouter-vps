@@ -34,6 +34,7 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 
 - `0.1153-def` is compatible with client `v0.62.10-3KTest`.
 - Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.
+- Pins the patched MQVPN server artifact with `[Routes]` support, required for VPS -> client LAN access over MQVPN.
 - Exposes MQVPN config through `omr-admin` so client `.10` can auto-sync key, port and tunnel IPs.
 - Supports client `.10` forced TCP port-forward over dedicated Xray reverse path.
 - Keeps UDP port-forward on the active VPN tunnel even when the client rule has the force-Xray flag enabled.
