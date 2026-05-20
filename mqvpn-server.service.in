@@ -1,0 +1,15 @@
+[Unit]
+Description=MQVPN Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'modprobe tun 2>/dev/null || true; mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200; chmod 666 /dev/net/tun'
+ExecStart=/usr/local/bin/mqvpn --config /etc/mqvpn/server.conf
+Restart=on-failure
+RestartSec=5
+ReadWritePaths=/dev/net/tun
+
+[Install]
+WantedBy=multi-user.target

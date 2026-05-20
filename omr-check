@@ -70,6 +70,7 @@ gt_udp_peers="$(collect_udp_peers 5000 glorytun || true)"
 ovpn_tcp_peers="$(collect_tcp_peers 65301 openvpn || true)"
 ovpn_udp_peers="$(collect_udp_peers 65301 openvpn || true)"
 mlvpn_peers="$(ss -Htnp 2>/dev/null | grep -F mlvpn 2>/dev/null | awk '{print $5}' | normalize_endpoint | sort -u || true)"
+mqvpn_peers="$(collect_udp_peers 65411 mqvpn || true)"
 dsvpn_peers="$(ss -Huanp 2>/dev/null | grep -F dsvpn 2>/dev/null | awk '$5 != "*:*" {print $5}' | normalize_endpoint | sort -u || true)"
 
 current_vpns=()
@@ -78,6 +79,7 @@ current_vpns=()
 [ -n "$ovpn_tcp_peers" ] && current_vpns+=("openvpn_tcp")
 [ -n "$ovpn_udp_peers" ] && current_vpns+=("openvpn_udp")
 [ -n "$mlvpn_peers" ] && current_vpns+=("mlvpn")
+[ -n "$mqvpn_peers" ] && current_vpns+=("mqvpn")
 [ -n "$dsvpn_peers" ] && current_vpns+=("dsvpn")
 
 printf 'MPTCP scheduler: %s\n' "$scheduler"
@@ -93,4 +95,5 @@ print_vpn_status 'glorytun_udp' 'glorytun-udp@tun0.service' 'gt-udp-tun0' "$gt_u
 print_vpn_status 'openvpn_tcp' 'openvpn@tun0.service' 'tun0' "$ovpn_tcp_peers"
 print_vpn_status 'openvpn_udp' 'openvpn@tun1.service' 'tun1' "$ovpn_udp_peers"
 print_vpn_status 'mlvpn' 'mlvpn@mlvpn0.service' 'mlvpn0' "$mlvpn_peers"
+print_vpn_status 'mqvpn' 'mqvpn-server.service' 'mqvpn0' "$mqvpn_peers"
 print_vpn_status 'dsvpn' 'dsvpn.service' 'dsvpn0' "$dsvpn_peers"

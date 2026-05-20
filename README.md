@@ -1,7 +1,9 @@
-# OpenMPTCProuter VPS scripts (omr-vps-0.1150-def)
+# OpenMPTCProuter VPS scripts (omr-vps-0.1153-def)
 
 This is the VPS part of OpenMPTCProuter, with my edits and custom repo and installation file.
-The ideal client part for this release is 0.62.4-3K which is the latest stable release with all my edit , see the end of the file for the list of modification.
+
+This VPS release is intended for the `OpenMPTCProuter v0.62.10-3KTest` client release.
+Use `0.1153-def` with client `.10` when testing MQVPN and forced TCP port-forward over Xray reverse path.
 
 ## Requirements
 
@@ -18,7 +20,7 @@ apt-get update
 apt-get install -y curl ca-certificates
 
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1048-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1153-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
@@ -30,6 +32,12 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 
 ## What did i edit
 
+- `0.1153-def` is compatible with client `v0.62.10-3KTest`.
+- Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.
+- Exposes MQVPN config through `omr-admin` so client `.10` can auto-sync key, port and tunnel IPs.
+- Supports client `.10` forced TCP port-forward over dedicated Xray reverse path.
+- Keeps UDP port-forward on the active VPN tunnel even when the client rule has the force-Xray flag enabled.
+- Preserves DNAT destination port for forwarded ports, e.g. public `2222` to router `22`.
 - Uses my repo for packages/artifacts.
 - Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`) needed for scheduler and CC sync from client to vps.
 - Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler` Custom kernel based on the default one ,recompiled kernel with bpf support on the vps side.
@@ -57,15 +65,18 @@ It shows:
 - whether a VPN peer is currently reachable
 - detected active peer endpoints when present
 
-## Patched client images
+## Compatible client images
 
-The `0.62.4-3K` client images used with this VPS branch include these patches:
+The `v0.62.10-3KTest` client images used with this VPS branch include these patches:
 
 - scheduler/CC sync fix in `openmptcprouter-vps` client init script
 - `opkg`/`apk` feed regeneration pinned to the original `v0.62` feed paths
 - tracker fixes for route recovery and state handling (`defaultgw`, IPv6 route lookup, `multipath` fallback, typo fixes, MTU helper cleanup)
 - `omr-test-speed` updated to use repo-managed host lists first
 - primary speed-test host lists now prefer local italian repo , Hetzner and Clouvider endpoints
+- MQVPN client integration with automatic key/config sync from VPS API
+- forced TCP port-forward over dedicated Xray reverse path
+- UDP fallback to the active VPN tunnel when force-Xray is enabled on a mixed TCP/UDP rule
 - AND A LOT, LOT , LOT, LOT , LOT of more [Changelog](Vanilla-Changelog.md).
 
 ## Glorytun swap helper

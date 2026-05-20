@@ -19,6 +19,8 @@ ACCEPT          gt-udp-tun+     -
 ACCEPT          -               gt-udp-tun+
 ACCEPT          mlvpn+		-
 ACCEPT          -               mlvpn+
+ACCEPT          mqvpn+		-
+ACCEPT          -               mqvpn+
 ACCEPT          dsvpn+		-
 ACCEPT          -               dsvpn+
 ACCEPT          tun+		-

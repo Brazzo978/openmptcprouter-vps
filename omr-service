@@ -108,6 +108,39 @@ _dsvpn() {
 	fi
 }
 
+_mqvpn() {
+	if systemctl list-unit-files mqvpn-server.service >/dev/null; then
+		[ -n "$(ip -6 r show 64:ff9b::/96 dev mqvpn0)" ] && ip -6 r del 64:ff9b::/96 dev mqvpn0 >/dev/null 2>&1
+		if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "mqvpn" ]; then
+			fail_file="/run/omr-mqvpn-fail.count"
+			localip="10.255.249.1"
+			if [ -f /etc/mqvpn/server.conf ]; then
+				subnet="$(sed -n 's/^[[:space:]]*Subnet[[:space:]]*=[[:space:]]*\(.*\)/\1/p' /etc/mqvpn/server.conf | head -1 | cut -d/ -f1 | tr -d ' ')"
+				[ -n "$subnet" ] && localip="$(echo "$subnet" | sed 's/\.0$/.1/')"
+			fi
+			remoteip="$(echo $localip | sed 's/\.1$/.2/')"
+			pid="$(pgrep -x mqvpn | head -n1)"
+			pid_age=0
+			[ -n "$pid" ] && pid_age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+			[ -z "$pid_age" ] && pid_age=0
+			fails=0
+			[ -f "$fail_file" ] && fails="$(cat "$fail_file" 2>/dev/null)"
+			[ -z "$fails" ] && fails=0
+			if ping -I mqvpn0 -c 3 -W 2 "$remoteip" >/dev/null 2>&1; then
+				echo 0 > "$fail_file"
+			else
+				fails=$((fails+1))
+				echo "$fails" > "$fail_file"
+				if { [ -z "$pid" ] && [ "$fails" -ge 2 ]; } || { [ -n "$pid" ] && [ "$pid_age" -ge 180 ] && [ "$fails" -ge 3 ]; }; then
+					logger -t "OMR-Service" "No answer from VPN client end ($fails failed probes, pid_age=${pid_age}s), restart MQVPN"
+					systemctl restart mqvpn-server.service
+					echo 0 > "$fail_file"
+				fi
+			fi
+		fi
+	fi
+}
+
 _softethervpn() {
 	if systemctl list-unit-files softether-vpnserver.service >/dev/null; then
 		if [ -z "$(ip a show dev tap_softether | grep '10.255.210.1')" ]; then
@@ -267,6 +300,7 @@ while true; do
 	_xray
 	_v2ray
 	_dsvpn
+	_mqvpn
 	_softethervpn
 	_wireguard
 	_multipath

@@ -18,6 +18,7 @@ net	$NET_IFACE	dhcp,tcpflags,routefilter,nosmurfs,sourceroute=0
 vpn	gt-tun+		nosmurfs,tcpflags
 vpn	gt-udp-tun+	nosmurfs,tcpflags
 vpn	mlvpn+		nosmurfs,tcpflags
+vpn	mqvpn+		nosmurfs,tcpflags
 vpn	tun+		nosmurfs,tcpflags
 vpn	wg+		nosmurfs,tcpflags
 vpncl	client-wg+	nosmurfs,tcpflags

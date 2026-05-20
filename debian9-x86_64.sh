@@ -35,6 +35,13 @@ OMR_ADMIN_PASS=${OMR_ADMIN_PASS:-$(od -vN "32" -An -tx1 /dev/urandom | tr '[:low
 OMR_ADMIN_PASS_ADMIN=${OMR_ADMIN_PASS_ADMIN:-$(od -vN "32" -An -tx1 /dev/urandom | tr '[:lower:]' '[:upper:]' | tr -d " \n")}
 MLVPN=${MLVPN:-yes}
 MLVPN_PASS=${MLVPN_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
+MQVPN=${MQVPN:-yes}
+MQVPN_PASS=${MQVPN_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
+MQVPN_PORT=${MQVPN_PORT:-65411}
+MQVPN_SUBNET=${MQVPN_SUBNET:-10.255.249.0/24}
+MQVPN_VERSION=${MQVPN_VERSION:-0.5.0-17-gb23a4ae}
+MQVPN_COMMIT=${MQVPN_COMMIT:-b23a4ae4e9ea90f5f0118f8f23b4de385fbc1fdf}
+MQVPN_BINARY_URL=${MQVPN_BINARY_URL:-https://repoomr.3klab.com/debian/mqvpn-${MQVPN_VERSION}-linux-amd64.tar.gz}
 UBOND=${UBOND:-no}
 UBOND_PASS=${UBOND_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
 OPENVPN=${OPENVPN:-yes}
@@ -86,7 +93,7 @@ MLVPN_BINARY_VERSION="3.0.0+20211028.git.ddafba3"
 UBOND_VERSION="31af0f69ebb6d07ed9348dca2fced33b956cedee"
 OBFS_VERSION="486bebd9208539058e57e23a12f23103016e09b4"
 OBFS_BINARY_VERSION="0.0.5-1"
-OMR_ADMIN_VERSION="239cbbf9043b6d629f150d9f177412350ec9f06e"
+OMR_ADMIN_VERSION="0.16+20260519-rpf"
 OMR_ADMIN_BINARY_VERSION="0.16+20260113"
 #OMR_ADMIN_BINARY_VERSION="0.3+20220827"
 DSVPN_VERSION="3b99d2ef6c02b2ef68b5784bec8adfdd55b29b1a"
@@ -106,17 +113,18 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1151-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1153-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
 OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://repoomr.3klab.com/openmptcprouter.gpg.key}
 OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
-OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-${OMR_VPS_ADMIN_GIT_URL%*.git}/archive/${OMR_ADMIN_VERSION}.zip}
+OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-https://repoomr.3klab.com/debian/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}.zip}
 MPTCPIZE_GIT_URL=${MPTCPIZE_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mptcpize.git}
 SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
 GLORYTUN_GIT_URL=${GLORYTUN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/glorytun.git}
 DSVPN_GIT_URL=${DSVPN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/dsvpn.git}
+MQVPN_GIT_URL=${MQVPN_GIT_URL:-https://github.com/mp0rta/mqvpn.git}
 OMR_FEEDS_BASE_URL=${OMR_FEEDS_BASE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-feeds/develop}
 VPS_CONFIG_URL=${VPS_CONFIG_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}}
 
@@ -131,7 +139,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1151-def"
+OMR_VERSION="0.1153-def"
 GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
 GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
@@ -303,13 +311,18 @@ if [ "$CHINA" = "yes" ]; then
 			cat /var/lib/openmptcprouter-vps-debian/openmptcprouter.gpg.key | apt-key add - >/dev/null 2>&1 || true
 		fi
 	rm -rf /usr/share/omr-server-git
-	if [ ! -d /usr/share/omr-server-git ]; then
+	if [ -f "${DIR}/debian9-x86_64.sh" ] && [ -f "${DIR}/omr-check" ]; then
+		mkdir -p /usr/share/omr-server-git
+		cp -a "${DIR}/." /usr/share/omr-server-git/
+	elif [ ! -d /usr/share/omr-server-git ]; then
 		#git clone https://gitee.com/ysurac/openmptcprouter-vps.git /usr/share/omr-server-git
 		git clone ${OMR_VPS_GIT_URL} /usr/share/omr-server-git
 	fi
 	cd /usr/share/omr-server-git
-	git pull
-	git checkout "${OMR_VPS_BRANCH}" >/dev/null 2>&1 || git checkout master >/dev/null 2>&1 || true
+	if [ -d .git ]; then
+		git pull
+		git checkout "${OMR_VPS_BRANCH}" >/dev/null 2>&1 || git checkout master >/dev/null 2>&1 || true
+	fi
 	LOCALFILES="yes"
 	TLS="no"
 	DIR="/usr/share/omr-server-git"
@@ -991,6 +1004,19 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 		fi
 		#OMR_ADMIN_PASS=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].openmptcprouter.user_password | tr -d "\n")
 		#OMR_ADMIN_PASS_ADMIN=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
+	fi
+	if [ -n "$OMR_ADMIN_ARCHIVE_URL" ]; then
+		rm -rf /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION} /tmp/openmptcprouter-vps-admin.zip
+		wget -O /tmp/openmptcprouter-vps-admin.zip ${OMR_ADMIN_ARCHIVE_URL}
+		cd /tmp
+		unzip -q -o openmptcprouter-vps-admin.zip
+		if [ -f /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py ]; then
+			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin.py /usr/local/bin/
+			chmod u+x /usr/local/bin/omr-admin.py
+		fi
+		if [ ! -f /etc/openmptcprouter-vps-admin/omr-admin-config.json ] && [ -f /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin-config.json ]; then
+			cp /tmp/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}/omr-admin-config.json /etc/openmptcprouter-vps-admin/
+		fi
 	fi
 	if [ ! -f /etc/openmptcprouter-vps-admin/key.pem ]; then
 		cd /etc/openmptcprouter-vps-admin
@@ -2218,6 +2244,93 @@ if [ "$DSVPN" = "yes" ]; then
 	fi
 fi
 
+if [ "$MQVPN" = "yes" ]; then
+	echo 'MQVPN'
+	if systemctl -q is-active mqvpn-server.service 2>/dev/null; then
+		systemctl -q disable mqvpn-server > /dev/null 2>&1
+		systemctl -q stop mqvpn-server > /dev/null 2>&1
+	fi
+	mqvpnupdate="0"
+	if [ -f /etc/mqvpn/server.conf ]; then
+		mqvpnupdate="1"
+		MQVPN_PASS2=$(sed -n '/^\[Auth\]/,/^\[/{ s/^[[:space:]]*Key[[:space:]]*=[[:space:]]*\(.*\)/\1/p; }' /etc/mqvpn/server.conf | head -1 | tr -d "\n")
+		[ -n "$MQVPN_PASS2" ] && MQVPN_PASS=$MQVPN_PASS2
+	fi
+	rm -f /var/lib/dpkg/lock
+	rm -f /var/lib/dpkg/lock-frontend
+	apt-get install -y --no-install-recommends bash curl ca-certificates openssl iproute2 iptables iputils-ping libevent-dev
+	if [ -n "$MQVPN_BINARY_URL" ]; then
+		rm -rf /tmp/mqvpn-artifact
+		mkdir -p /tmp/mqvpn-artifact
+		case "$MQVPN_BINARY_URL" in
+			*.deb)
+				curl -fsSL "$MQVPN_BINARY_URL" -o /tmp/mqvpn-artifact/mqvpn.deb
+				dpkg -i /tmp/mqvpn-artifact/mqvpn.deb
+				[ -x /usr/bin/mqvpn ] && install -m 755 /usr/bin/mqvpn /usr/local/bin/mqvpn
+				;;
+			*)
+				curl -fsSL "$MQVPN_BINARY_URL" -o /tmp/mqvpn-artifact/mqvpn.tar.gz
+				tar xzf /tmp/mqvpn-artifact/mqvpn.tar.gz -C /tmp/mqvpn-artifact
+				if [ -x /tmp/mqvpn-artifact/bin/mqvpn ]; then
+					install -m 755 /tmp/mqvpn-artifact/bin/mqvpn /usr/local/bin/mqvpn
+					[ -d /tmp/mqvpn-artifact/lib ] && cp -a /tmp/mqvpn-artifact/lib/. /usr/local/lib/
+				elif [ -x /tmp/mqvpn-artifact/mqvpn ]; then
+					install -m 755 /tmp/mqvpn-artifact/mqvpn /usr/local/bin/mqvpn
+				else
+					echo 'ERROR: MQVPN artifact does not contain an mqvpn binary'
+					exit 1
+				fi
+				;;
+		esac
+		rm -rf /tmp/mqvpn-artifact
+	else
+		apt-get install -y --no-install-recommends build-essential cmake pkg-config git libevent-dev
+		rm -rf /tmp/mqvpn
+		git clone --recursive "$MQVPN_GIT_URL" /tmp/mqvpn
+		cd /tmp/mqvpn
+		git checkout "$MQVPN_COMMIT"
+		git submodule update --init --recursive
+		./build.sh
+		install -m 755 /tmp/mqvpn/build/mqvpn /usr/local/bin/mqvpn
+		for lib in /tmp/mqvpn/build/libmqvpn.so* /tmp/mqvpn/third_party/xquic/build/libxquic.so*; do
+			[ -e "$lib" ] && install -m 644 "$lib" /usr/local/lib/
+		done
+		rm -rf /tmp/mqvpn
+	fi
+	ldconfig >/dev/null 2>&1 || true
+	if [ ! -x /usr/local/bin/mqvpn ]; then
+		echo 'ERROR: MQVPN install failed: /usr/local/bin/mqvpn not found'
+		exit 1
+	fi
+	mkdir -p /etc/mqvpn
+	if [ "$mqvpnupdate" = "0" ] || [ ! -f /etc/mqvpn/server.conf ]; then
+		if [ "$LOCALFILES" = "no" ]; then
+			wget -O /etc/mqvpn/server.conf ${VPS_CONFIG_URL}${VPSPATH}/mqvpn-server.conf
+		else
+			cp ${DIR}/mqvpn-server.conf /etc/mqvpn/server.conf
+		fi
+		sed -i "s:MQVPN_PASS:$MQVPN_PASS:g" /etc/mqvpn/server.conf
+		sed -i "s:MQVPN_PORT:$MQVPN_PORT:g" /etc/mqvpn/server.conf
+	fi
+	chmod 0600 /etc/mqvpn/server.conf
+	if [ ! -f /etc/mqvpn/server.key ] || [ ! -f /etc/mqvpn/server.crt ]; then
+		openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+			-keyout /etc/mqvpn/server.key \
+			-out /etc/mqvpn/server.crt \
+			-subj "/C=US/ST=Oregon/L=Portland/O=OpenMPTCProuterVPS/OU=MQVPN/CN=mqvpn.openmptcprouter.vps"
+		chmod 0600 /etc/mqvpn/server.key
+		chmod 0644 /etc/mqvpn/server.crt
+	fi
+	if [ "$LOCALFILES" = "no" ]; then
+		wget -O /lib/systemd/system/mqvpn-server.service ${VPS_CONFIG_URL}${VPSPATH}/mqvpn-server.service.in
+	else
+		cp ${DIR}/mqvpn-server.service.in /lib/systemd/system/mqvpn-server.service
+	fi
+	chmod 644 /lib/systemd/system/mqvpn-server.service
+	systemctl daemon-reload
+	systemctl enable mqvpn-server.service
+fi
+
 # Install Glorytun TCP
 if systemctl -q is-active glorytun-tcp@tun0.service 2>/dev/null; then
 	systemctl -q stop 'glorytun-tcp@*' > /dev/null 2>&1
@@ -2511,6 +2624,18 @@ else
 	if ! grep -q '10.255.246.0/24' /etc/shorewall/snat; then
 		echo "MASQUERADE		10.255.246.0/24		\$NET_IFACE" >> /etc/shorewall/snat
 	fi
+	if ! grep -Eq '^vpn[[:space:]]+mqvpn\+' /etc/shorewall/interfaces; then
+		echo "vpn	mqvpn+		nosmurfs,tcpflags" >> /etc/shorewall/interfaces
+	fi
+	if ! grep -Eq '^ACCEPT[[:space:]]+mqvpn\+' /etc/shorewall/stoppedrules; then
+		echo "ACCEPT          mqvpn+		-" >> /etc/shorewall/stoppedrules
+	fi
+	if ! grep -Eq '^ACCEPT[[:space:]]+-[[:space:]]+mqvpn\+' /etc/shorewall/stoppedrules; then
+		echo "ACCEPT          -               mqvpn+" >> /etc/shorewall/stoppedrules
+	fi
+	if ! grep -q '10.255.249.0/24' /etc/shorewall/snat; then
+		echo "MASQUERADE		10.255.249.0/24		\$NET_IFACE" >> /etc/shorewall/snat
+	fi
 	if [ "$LOCALFILES" = "no" ]; then
 		rm -rf ${DIR}/shorewall4
 		rm -rf ${DIR}/shorewall6
@@ -2647,6 +2772,11 @@ if [ "$update" = "0" ]; then
 		echo 'Your MLVPN password: '
 		echo $MLVPN_PASS
 	fi
+	if [ "$MQVPN" = "yes" ]; then
+		echo "MQVPN port: $MQVPN_PORT"
+		echo 'Your MQVPN key: '
+		echo $MQVPN_PASS
+	fi
 	if [ "$UBOND" = "yes" ]; then
 		echo 'UBOND first port: 65251'
 		echo 'Your UBOND password: '
@@ -2713,6 +2843,13 @@ if [ "$update" = "0" ]; then
 		Your MLVPN password: $MLVPN_PASS
 		EOF
 	fi
+	if [ "$MQVPN" = "yes" ]; then
+		cat >> /root/openmptcprouter_config.txt <<-EOF
+		MQVPN port: $MQVPN_PORT
+		MQVPN version: $MQVPN_VERSION
+		Your MQVPN key: $MQVPN_PASS
+		EOF
+	fi
 	if [ "$UBOND" = "yes" ]; then
 		cat >> /root/openmptcprouter_config.txt <<-EOF
 		UBOND first port: 65251
@@ -2742,6 +2879,11 @@ else
 	if [ "$MLVPN" = "yes" ]; then
 		echo 'Restarting mlvpn...'
 		systemctl -q restart mlvpn@mlvpn0
+		echo 'done'
+	fi
+	if [ "$MQVPN" = "yes" ]; then
+		echo 'Restarting mqvpn...'
+		systemctl -q restart mqvpn-server.service
 		echo 'done'
 	fi
 	if [ "$UBOND" = "yes" ]; then
