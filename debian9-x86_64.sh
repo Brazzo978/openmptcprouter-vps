@@ -2728,6 +2728,30 @@ if [ "$TLS" = "yes" ]; then
 	fi
 fi
 
+if [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
+	# Final kernel pin after all package installs/upgrades. Debian 13 can pull a
+	# newer stock kernel late in the installer, making it the first GRUB entry.
+	KREL="${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
+	if [ -f "/boot/vmlinuz-${KREL}" ]; then
+		linux-update-symlinks install "$KREL" "/boot/vmlinuz-${KREL}" >/dev/null 2>&1 || true
+		if grep -q '^GRUB_TOP_LEVEL=' /etc/default/grub; then
+			sed -i "s@^GRUB_TOP_LEVEL=.*@GRUB_TOP_LEVEL=\"/boot/vmlinuz-${KREL}\"@" /etc/default/grub
+		else
+			echo "GRUB_TOP_LEVEL=\"/boot/vmlinuz-${KREL}\"" >> /etc/default/grub
+		fi
+		sed -i "s@^\(GRUB_DEFAULT=\).*@\1\"0\"@" /etc/default/grub >/dev/null 2>&1
+		sed -i '/^GRUB_SAVEDEFAULT=/d' /etc/default/grub >/dev/null 2>&1 || true
+		for pkg in $(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | grep -E 'linux-image-[0-9]+\.[0-9]+\.[0-9]+\+deb' || true); do
+			PKGREL=$(echo "$pkg" | sed -e 's/^linux-image-//' -e 's/+.*$//')
+			if dpkg --compare-versions "$PKGREL" gt "$KERNEL_VERSION" && [ "$pkg" != "linux-image-$(uname -r)" ]; then
+				apt-get -y purge "$pkg" >/dev/null 2>&1 || true
+			fi
+		done
+		apt-get -y purge linux-image-amd64 linux-headers-amd64 linux-image-cloud-amd64 linux-headers-cloud-amd64 >/dev/null 2>&1 || true
+		[ -f /boot/grub/grub.cfg ] && grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
+	fi
+fi
+
 if [ "$SPEEDTEST" = "yes" ]; then
 	mkdir -p /usr/share/omr-server/speedtest
 	if [ ! -f /usr/share/omr-server/speedtest/test.img ] && [ "$(df /usr/share/omr-server/speedtest | awk '/[0-9]%/{print $(NF-2)}')" -gt 2000000 ]; then
@@ -2763,6 +2787,23 @@ fi
 if [ "$SOURCES" != "yes" ]; then
 	apt-get -y install omr-server=${OMR_VERSION} >/dev/null 2>&1 || true
 	rm -f /etc/openmtpcprouter-vps-admin/update-bin
+fi
+
+if [ "$MQVPN" = "yes" ]; then
+	# omr-server can refresh /etc/shorewall from package defaults; re-apply
+	# MQVPN firewall integration after package install so clean installs keep it.
+	if ! grep -Eq '^vpn[[:space:]]+mqvpn\+' /etc/shorewall/interfaces; then
+		echo "vpn	mqvpn+		nosmurfs,tcpflags" >> /etc/shorewall/interfaces
+	fi
+	if ! grep -Eq '^ACCEPT[[:space:]]+mqvpn\+' /etc/shorewall/stoppedrules; then
+		echo "ACCEPT          mqvpn+		-" >> /etc/shorewall/stoppedrules
+	fi
+	if ! grep -Eq '^ACCEPT[[:space:]]+-[[:space:]]+mqvpn\+' /etc/shorewall/stoppedrules; then
+		echo "ACCEPT          -               mqvpn+" >> /etc/shorewall/stoppedrules
+	fi
+	if ! grep -q '10.255.249.0/24' /etc/shorewall/snat; then
+		echo "MASQUERADE		10.255.249.0/24		\$NET_IFACE" >> /etc/shorewall/snat
+	fi
 fi
 
 if [ "$update" = "0" ]; then
