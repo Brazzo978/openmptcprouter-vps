@@ -39,8 +39,8 @@ MQVPN=${MQVPN:-yes}
 MQVPN_PASS=${MQVPN_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
 MQVPN_PORT=${MQVPN_PORT:-65411}
 MQVPN_SUBNET=${MQVPN_SUBNET:-10.255.249.0/24}
-MQVPN_VERSION=${MQVPN_VERSION:-0.5.0-17-gb23a4ae-omr1}
-MQVPN_COMMIT=${MQVPN_COMMIT:-b23a4ae4e9ea90f5f0118f8f23b4de385fbc1fdf}
+MQVPN_VERSION=${MQVPN_VERSION:-0.5.0-3k12-omr2}
+MQVPN_COMMIT=${MQVPN_COMMIT:-efff246cb678f9cba994bd362856cc6c8b1e7cd3}
 MQVPN_BINARY_URL=${MQVPN_BINARY_URL:-}
 UBOND=${UBOND:-no}
 UBOND_PASS=${UBOND_PASS:-$(head -c 32 /dev/urandom | base64 -w0)}
@@ -113,7 +113,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1153-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1154-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -125,7 +125,7 @@ MPTCPIZE_GIT_URL=${MPTCPIZE_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mptcpi
 SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
 GLORYTUN_GIT_URL=${GLORYTUN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/glorytun.git}
 DSVPN_GIT_URL=${DSVPN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/dsvpn.git}
-MQVPN_GIT_URL=${MQVPN_GIT_URL:-https://github.com/mp0rta/mqvpn.git}
+MQVPN_GIT_URL=${MQVPN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/mqvpn.git}
 OMR_FEEDS_BASE_URL=${OMR_FEEDS_BASE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-feeds/develop}
 VPS_CONFIG_URL=${VPS_CONFIG_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}}
 
@@ -140,7 +140,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1153-def"
+OMR_VERSION="0.1154-def"
 GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
 GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
@@ -2340,6 +2340,57 @@ if [ "$MQVPN" = "yes" ]; then
 		sed -i "s:MQVPN_PASS:$MQVPN_PASS:g" /etc/mqvpn/server.conf
 		sed -i "s:MQVPN_PORT:$MQVPN_PORT:g" /etc/mqvpn/server.conf
 	fi
+	omr_mqvpn_conf_set() {
+		_omr_mqvpn_section="$1"
+		_omr_mqvpn_key="$2"
+		_omr_mqvpn_value="$3"
+		_omr_mqvpn_file="/etc/mqvpn/server.conf"
+		_omr_mqvpn_tmp="$(mktemp)"
+		awk -v section="$_omr_mqvpn_section" -v key="$_omr_mqvpn_key" -v value="$_omr_mqvpn_value" '
+			BEGIN {
+				target = "[" section "]";
+				in_section = 0;
+				found_section = 0;
+				wrote_key = 0;
+			}
+			/^\[[^]]+\][[:space:]]*$/ {
+				if (in_section && !wrote_key) {
+					print key " = " value;
+					wrote_key = 1;
+				}
+				in_section = ($0 == target);
+				if (in_section) found_section = 1;
+				print;
+				next;
+			}
+			{
+				if (in_section && $0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+					if (!wrote_key) {
+						print key " = " value;
+						wrote_key = 1;
+					}
+					next;
+				}
+				print;
+			}
+			END {
+				if (!found_section) {
+					print "";
+					print target;
+					print key " = " value;
+				} else if (in_section && !wrote_key) {
+					print key " = " value;
+				}
+			}
+		' "$_omr_mqvpn_file" > "$_omr_mqvpn_tmp" && cat "$_omr_mqvpn_tmp" > "$_omr_mqvpn_file"
+		rm -f "$_omr_mqvpn_tmp"
+	}
+	omr_mqvpn_conf_set Interface MTU 0
+	omr_mqvpn_conf_set Multipath Scheduler wlb
+	omr_mqvpn_conf_set Multipath CC bbr2
+	omr_mqvpn_conf_set Multipath OuterPacketSize 1400
+	omr_mqvpn_conf_set Multipath PMTUD false
+	omr_mqvpn_conf_set Multipath PMTUDProbeSize 1420
 	chmod 0600 /etc/mqvpn/server.conf
 	if [ ! -f /etc/mqvpn/server.key ] || [ ! -f /etc/mqvpn/server.crt ]; then
 		openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
