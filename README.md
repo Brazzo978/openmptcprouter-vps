@@ -1,9 +1,9 @@
-# OpenMPTCProuter VPS scripts (omr-vps-0.1154-def)
+# OpenMPTCProuter VPS scripts (omr-vps-0.1155-def)
 
 This is the VPS part of OpenMPTCProuter, with my edits and custom repo and installation file.
 
-This VPS release is intended for the `OpenMPTCProuter v0.62.12-3K` client release.
-Use `0.1154-def` with client `.12` when testing MQVPN scheduler/CC/MTU profiles and forced TCP port-forward over Xray reverse path.
+This VPS release is intended for the `OpenMPTCProuter v0.62.13-3K` client release.
+Use `0.1155-def` with client `.13` when testing MQVPN scheduler/CC/MTU profiles and forced TCP port-forward over Xray reverse path.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ apt-get update
 apt-get install -y curl ca-certificates
 
 curl -fsSL \
-  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1154-def/debian9-x86_64.sh \
+  https://raw.githubusercontent.com/Brazzo978/openmptcprouter-vps/omr-vps-0.1155-def/debian9-x86_64.sh \
   -o /root/debian9-x86_64.sh
 chmod +x /root/debian9-x86_64.sh
 
@@ -32,12 +32,14 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 
 ## What did i edit
 
-- `0.1154-def` is compatible with client `v0.62.12-3K`.
+- `0.1155-def` is compatible with client `v0.62.13-3K`.
+- Ships the rebuilt `6.12.67-x64v3-net-perf-3k-xanmod1-v2` kernel package with MPTCP BPF scheduler support and BBR/NanBBR sidecars.
+- Keeps `bbr` as BBRv3/default, and adds synced test choices `bbr1` and `bbr2` for client/server MPTCP congestion-control testing.
 - Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.
-- Pins the patched MQVPN server artifact with `[Routes]` support, scheduler `backup`/`rap`, CC selection, and MTU/PMTUD packet-size controls required by client `.12`.
-- Exposes MQVPN config through `omr-admin` so client `.12` can auto-sync key, port and tunnel IPs.
+- Pins the patched MQVPN server artifact with `[Routes]` support, scheduler `backup`/`rap`, CC selection, and MTU/PMTUD packet-size controls required by client `.13`.
+- Exposes MQVPN config through `omr-admin` so client `.13` can auto-sync key, port and tunnel IPs.
 - Keeps MQVPN FEC internal/default only; it is not exposed as a user GUI/server toggle.
-- Supports client `.12` forced TCP port-forward over dedicated Xray reverse path.
+- Supports client `.13` forced TCP port-forward over dedicated Xray reverse path.
 - Rejects forced Xray reverse TCP port-forward ranges with a clean API error; use one TCP source port per force-Xray rule.
 - Keeps UDP port-forward on the active VPN tunnel even when the client rule has the force-Xray flag enabled.
 - Preserves DNAT destination port for forwarded ports, e.g. public `2222` to router `22`.
@@ -70,7 +72,7 @@ It shows:
 
 ## Compatible client images
 
-The `v0.62.12-3K` client images used with this VPS branch include these patches:
+The `v0.62.13-3K` client images used with this VPS branch include these patches:
 
 - scheduler/CC sync fix in `openmptcprouter-vps` client init script
 - `opkg`/`apk` feed regeneration pinned to the original `v0.62` feed paths

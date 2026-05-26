@@ -113,7 +113,7 @@ DEFAULT_USER="openmptcprouter"
 
 # Fork snapshot defaults (independent from upstream Ysurac infrastructure)
 OMR_GITHUB_ORG=${OMR_GITHUB_ORG:-Brazzo978}
-OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1154-def}
+OMR_VPS_BRANCH=${OMR_VPS_BRANCH:-omr-vps-0.1155-def}
 OMR_VPS_GIT_URL=${OMR_VPS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps.git}
 OMR_VPS_DEBIAN_GIT_URL=${OMR_VPS_DEBIAN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-debian.git}
 OMR_VPS_DEBIAN_BRANCH=${OMR_VPS_DEBIAN_BRANCH:-main}
@@ -140,7 +140,7 @@ VPSURL=${VPSURL:-https://repoomr.3klab.com/}
 REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
-OMR_VERSION="0.1154-def"
+OMR_VERSION="0.1155-def"
 GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
 GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
@@ -540,8 +540,8 @@ elif [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
 		PSABI="x64v3"
 	fi
 	KERNEL_VERSION="6.12.67"
-	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-7}"
-	OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-omr-3ktest-xanmod1}"
+	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-8}"
+	OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-net-perf-3k-xanmod1-v2}"
 	OMR_IMAGE_DEB="linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
 	OMR_HEADERS_DEB="linux-headers-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
 	OMR_LIBC_DEB="linux-libc-dev_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
