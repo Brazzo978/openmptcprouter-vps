@@ -540,7 +540,7 @@ elif [ "$KERNEL" = "6.12" ] && [ "$ARCH" = "amd64" ]; then
 		PSABI="x64v3"
 	fi
 	KERNEL_VERSION="6.12.67"
-	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-8}"
+	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-9}"
 	OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-net-perf-3k-xanmod1-v2}"
 	OMR_IMAGE_DEB="linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
 	OMR_HEADERS_DEB="linux-headers-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
@@ -2815,6 +2815,7 @@ fi
 # Add OpenMPTCProuter VPS script version to /etc/motd
 if [ -f /etc/motd.head ]; then
 	if grep --quiet 'OpenMPTCProuter VPS' /etc/motd.head; then
+		sed -i "s:< OpenMPTCProuter VPS [^>]* >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd.head
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-test[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd.head
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-rolling[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd.head
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-rolling-test[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd.head
@@ -2824,6 +2825,7 @@ if [ -f /etc/motd.head ]; then
 	fi
 elif [ -f /etc/motd ]; then
 	if grep --quiet 'OpenMPTCProuter VPS' /etc/motd; then
+		sed -i "s:< OpenMPTCProuter VPS [^>]* >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-test[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-rolling[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd
 		sed -i "s:< OpenMPTCProuter VPS [0-9]*\.[0-9]*\(\|-rolling-test[0-9]*\) >:< OpenMPTCProuter VPS $OMR_VERSION >:g" /etc/motd
