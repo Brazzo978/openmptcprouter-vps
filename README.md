@@ -15,6 +15,9 @@ Note: on fresh install (`update=0`), Debian 12 is auto-upgraded to Debian 13 by 
 
 ## Quick install (new VPS)
 
+`0.1155-def` is fresh-install only. It intentionally refuses to run on an
+existing OpenMPTCProuter VPS; reinstall the VPS from a clean Debian image first.
+
 ```bash
 apt-get update
 apt-get install -y curl ca-certificates
@@ -33,6 +36,7 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 ## What did i edit
 
 - `0.1155-def` is compatible with client `v0.62.13-3K`.
+- Blocks in-place upgrades from older VPS releases; this release must be installed on a clean Debian VPS.
 - Ships the rebuilt `6.12.67-x64v3-net-perf-3k-xanmod1-v2` kernel package (`6.12.67-9`) with MPTCP BPF scheduler support and BBR/NanBBR sidecars.
 - Keeps `bbr` as BBRv3/default, and adds synced test choices `bbr1` and `bbr2` for client/server MPTCP congestion-control testing.
 - Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.

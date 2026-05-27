@@ -215,18 +215,29 @@ if [ -f /etc/motd.head ] && grep --quiet 'OpenMPCTProuter VPS' /etc/motd.head ; 
 	sed -i 's/OpenMPCTProuter/OpenMPTCProuter/g' /etc/motd.head
 fi
 
-# Check if OpenMPTCProuter VPS is already installed
+# Check if OpenMPTCProuter VPS is already installed.
+# This forked 0.1155-def installer is intentionally fresh-install only:
+# upgrading old VPS states caused too many mixed config/kernel/service states.
 echo "Check if OpenMPTCProuter VPS is already installed..."
 update="0"
-if [ "$UPDATE" = "yes" ]; then
-	if [ -f /etc/motd ] && grep --quiet 'OpenMPTCProuter VPS' /etc/motd ; then
-		update="1"
-	elif [ -f /etc/motd.head ] && grep --quiet 'OpenMPTCProuter VPS' /etc/motd.head ; then
-		update="1"
-	elif [ -f /root/openmptcprouter_config.txt ]; then
-		update="1"
+CURRENT_OMR="$(grep -sh 'OpenMPTCProuter VPS' /etc/motd /etc/motd.head 2>/dev/null | awk '{print $4}' | tail -n 1 || true)"
+if [ -n "$CURRENT_OMR" ] \
+	|| [ -f /root/openmptcprouter_config.txt ] \
+	|| [ -d /etc/openmptcprouter-vps-admin ] \
+	|| [ -d /etc/openmtpcprouter-vps-admin ] \
+	|| [ -e /etc/systemd/system/omr.service ] \
+	|| [ -e /lib/systemd/system/omr.service ] \
+	|| [ -e /usr/lib/systemd/system/omr.service ] \
+	|| [ -e /etc/systemd/system/omr-admin.service ] \
+	|| [ -e /lib/systemd/system/omr-admin.service ] \
+	|| [ -e /usr/lib/systemd/system/omr-admin.service ] \
+	|| dpkg-query -W -f='${Status}' omr-server 2>/dev/null | grep -q 'install ok installed'; then
+	echo "E: OpenMPTCProuter VPS is already installed on this server."
+	if [ -n "$CURRENT_OMR" ]; then
+		echo "Detected version: $CURRENT_OMR"
 	fi
-	echo "Update mode"
+	echo "0.1155-def is fresh-install only. Reinstall the VPS from a clean Debian image before running this installer."
+	exit 1
 fi
 # Force update key
 #[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
@@ -234,11 +245,6 @@ fi
 #	#wget -O - http://repo.openmptcprouter.com/openmptcprouter.gpg.key | apt-key add -
 #	wget https://${REPO}/openmptcprouter.gpg.key -O /etc/apt/trusted.gpg.d/openmptcprouter.gpg
 #}
-
-CURRENT_OMR="$(grep -s 'OpenMPTCProuter VPS' /etc/* | awk '{print $4}' || true)"
-if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
-	exit 1
-fi
 
 # Force update key
 [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
