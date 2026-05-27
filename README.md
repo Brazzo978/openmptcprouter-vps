@@ -13,6 +13,9 @@ Note: on fresh install (`update=0`), Debian 12 is auto-upgraded to Debian 13 by 
 
 ## Quick install (new VPS)
 
+`0.1150-def` is fresh-install only. It intentionally refuses to run on an
+existing OpenMPTCProuter VPS; reinstall the VPS from a clean Debian image first.
+
 ```bash
 apt-get update
 apt-get install -y curl ca-certificates
@@ -30,6 +33,7 @@ VPS_DOMAIN="put.your.domain.here" KERNEL=6.12 /root/debian9-x86_64.sh
 
 ## What did i edit
 
+- Blocks in-place upgrades from older VPS releases; this release must be installed on a clean Debian VPS.
 - Uses my repo for packages/artifacts.
 - Installs and enables the MPTCP compat bridge (`omr-mptcp-compat`) needed for scheduler and CC sync from client to vps.
 - Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler` Custom kernel based on the default one ,recompiled kernel with bpf support on the vps side.
