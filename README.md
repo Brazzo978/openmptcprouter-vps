@@ -46,6 +46,7 @@ VPS_DOMAIN="put.your.domain.here" /root/debian9-x86_64.sh
 - Includes the XQUIC BBR2 64-bit loss-round counter fix and bounded idle polling.
 - Limits MQVPN systemd restart bursts to avoid persistent recovery storms.
 - Blocks in-place upgrades from older VPS releases; this release must be installed on a clean Debian VPS.
+- Requires an `x86-64-v3` VPS CPU and rejects legacy `x64v1/x64v2` hosts before changing the system.
 - Ships the rebuilt `6.12.67-x64v3-net-perf-3k-xanmod1-v2` kernel package (`6.12.67-10`) with MPTCP BPF scheduler support, the fixed NanBBR profiles and `nanbbr1_var`, `nanbbr2_var`, `nanbbr3_var`.
 - Keeps `bbr` as BBRv3/default, and adds synced test choices `bbr1` and `bbr2` for client/server MPTCP congestion-control testing.
 - Adds MQVPN server installation, config, systemd unit, Shorewall interface/SNAT handling and health checks.

@@ -165,6 +165,14 @@ if [ "$ARCH" != "amd64" ]; then
 	echo "The OMR 6.12 kernel installer supports only x86_64 (amd64)."
 	exit 1
 fi
+PSABI=$(awk 'BEGIN { while (!/flags/) if (getline < "/proc/cpuinfo" != 1) exit 1; if (/lm/&&/cmov/&&/cx8/&&/fpu/&&/fxsr/&&/mmx/&&/syscall/&&/sse2/) level = 1; if (level == 1 && /cx16/&&/lahf/&&/popcnt/&&/sse4_1/&&/sse4_2/&&/ssse3/) level = 2; if (level == 2 && /avx/&&/avx2/&&/bmi1/&&/bmi2/&&/f16c/&&/fma/&&/abm/&&/movbe/&&/xsave/) level = 3; if (level == 3 && /avx512f/&&/avx512bw/&&/avx512cd/&&/avx512dq/&&/avx512vl/) level = 4; if (level > 0) { print "x64v" level; exit level + 1 }; exit 1;}' | tr -d "\n")
+if [ "$PSABI" = "x64v4" ]; then
+	PSABI="x64v3"
+fi
+if [ "$PSABI" != "x64v3" ]; then
+	echo "This release requires an x86-64-v3 CPU. Legacy x64v1/x64v2 kernels are not supported."
+	exit 1
+fi
 
 echo "Check virtualized environment"
 VIRT="$(systemd-detect-virt 2>/dev/null || true)"
@@ -382,46 +390,41 @@ if [ -z "$(dpkg-query -l | grep grub)" ]; then
 	}
 fi
 
-# Install the only supported kernel: the pinned OMR 6.12 build.
-	PSABI=$(awk 'BEGIN { while (!/flags/) if (getline < "/proc/cpuinfo" != 1) exit 1; if (/lm/&&/cmov/&&/cx8/&&/fpu/&&/fxsr/&&/mmx/&&/syscall/&&/sse2/) level = 1; if (level == 1 && /cx16/&&/lahf/&&/popcnt/&&/sse4_1/&&/sse4_2/&&/ssse3/) level = 2; if (level == 2 && /avx/&&/avx2/&&/bmi1/&&/bmi2/&&/f16c/&&/fma/&&/abm/&&/movbe/&&/xsave/) level = 3; if (level == 3 && /avx512f/&&/avx512bw/&&/avx512cd/&&/avx512dq/&&/avx512vl/) level = 4; if (level > 0) { print "x64v" level; exit level + 1 }; exit 1;}' | tr -d "\n")
-	#'
-	if [ "$PSABI" = "x64v4" ]; then
-		PSABI="x64v3"
+# Install the only supported kernel: the pinned OMR 6.12 x64v3 build.
+KERNEL_VERSION="6.12.67"
+OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-10}"
+OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-net-perf-3k-xanmod1-v2}"
+OMR_IMAGE_DEB="linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+OMR_HEADERS_DEB="linux-headers-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+OMR_LIBC_DEB="linux-libc-dev_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
+wget -O /tmp/${OMR_IMAGE_DEB} ${VPSURL}kernel/${OMR_IMAGE_DEB}
+wget -O /tmp/${OMR_HEADERS_DEB} ${VPSURL}kernel/${OMR_HEADERS_DEB}
+wget -O /tmp/${OMR_LIBC_DEB} ${VPSURL}kernel/${OMR_LIBC_DEB} || true
+echo "Install OMR kernel linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
+dpkg --force-all -i -B /tmp/${OMR_LIBC_DEB} >/dev/null 2>&1 || true
+dpkg --force-all -i -B /tmp/${OMR_HEADERS_DEB}
+dpkg --force-all -i -B /tmp/${OMR_IMAGE_DEB}
+# Some VPS providers ignore guest GRUB defaults and boot the highest distro kernel.
+# Keep OMR as preferred boot target by purging newer stock Debian kernels.
+for pkg in $(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | grep -E 'linux-image-[0-9]+\.[0-9]+\.[0-9]+\+deb' || true); do
+	PKGREL=$(echo "$pkg" | sed -e 's/^linux-image-//' -e 's/+.*$//')
+	if dpkg --compare-versions "$PKGREL" gt "$KERNEL_VERSION"; then
+		apt-get -y purge "$pkg" >/dev/null 2>&1 || true
 	fi
-	KERNEL_VERSION="6.12.67"
-	OMR_KERNEL_PKG_VERSION="${OMR_KERNEL_PKG_VERSION:-6.12.67-10}"
-	OMR_KERNEL_SUFFIX="${OMR_KERNEL_SUFFIX:-net-perf-3k-xanmod1-v2}"
-	OMR_IMAGE_DEB="linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
-	OMR_HEADERS_DEB="linux-headers-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
-	OMR_LIBC_DEB="linux-libc-dev_${OMR_KERNEL_PKG_VERSION}_amd64.deb"
-	wget -O /tmp/${OMR_IMAGE_DEB} ${VPSURL}kernel/${OMR_IMAGE_DEB}
-	wget -O /tmp/${OMR_HEADERS_DEB} ${VPSURL}kernel/${OMR_HEADERS_DEB}
-	wget -O /tmp/${OMR_LIBC_DEB} ${VPSURL}kernel/${OMR_LIBC_DEB} || true
-	echo "Install OMR kernel linux-image-${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
-	dpkg --force-all -i -B /tmp/${OMR_LIBC_DEB} >/dev/null 2>&1 || true
-	dpkg --force-all -i -B /tmp/${OMR_HEADERS_DEB}
-	dpkg --force-all -i -B /tmp/${OMR_IMAGE_DEB}
-	# Some VPS providers ignore guest GRUB defaults and boot the highest distro kernel.
-	# Keep OMR as preferred boot target by purging newer stock Debian kernels.
-	for pkg in $(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | grep -E 'linux-image-[0-9]+\.[0-9]+\.[0-9]+\+deb' || true); do
-		PKGREL=$(echo "$pkg" | sed -e 's/^linux-image-//' -e 's/+.*$//')
-		if dpkg --compare-versions "$PKGREL" gt "$KERNEL_VERSION"; then
-			apt-get -y purge "$pkg" >/dev/null 2>&1 || true
-		fi
-	done
-	apt-get -y purge linux-image-amd64 linux-headers-amd64 linux-image-cloud-amd64 linux-headers-cloud-amd64 >/dev/null 2>&1 || true
+done
+apt-get -y purge linux-image-amd64 linux-headers-amd64 linux-image-cloud-amd64 linux-headers-cloud-amd64 >/dev/null 2>&1 || true
 
-	[ -f /etc/default/grub ] && {
-		if [ -f /boot/grub/grub.cfg ]; then
-			KREL="${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
-			BOOTID=$(awk -F"'" -v k="$KREL" '$0 ~ "menuentry " && $0 ~ k && $0 !~ /recovery/ {for(i=1;i<=NF;i++) if($i ~ /^gnulinux-/) {print $i; exit}}' /boot/grub/grub.cfg)
-			if [ -n "$BOOTID" ]; then
-				sed -i "s@^\(GRUB_DEFAULT=\).*@\1\"${BOOTID}\"@" /etc/default/grub >/dev/null 2>&1
-				sed -i '/^GRUB_SAVEDEFAULT=/d' /etc/default/grub >/dev/null 2>&1 || true
-			fi
-			grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
+[ -f /etc/default/grub ] && {
+	if [ -f /boot/grub/grub.cfg ]; then
+		KREL="${KERNEL_VERSION}-${PSABI}-${OMR_KERNEL_SUFFIX}"
+		BOOTID=$(awk -F"'" -v k="$KREL" '$0 ~ "menuentry " && $0 ~ k && $0 !~ /recovery/ {for(i=1;i<=NF;i++) if($i ~ /^gnulinux-/) {print $i; exit}}' /boot/grub/grub.cfg)
+		if [ -n "$BOOTID" ]; then
+			sed -i "s@^\(GRUB_DEFAULT=\).*@\1\"${BOOTID}\"@" /etc/default/grub >/dev/null 2>&1
+			sed -i '/^GRUB_SAVEDEFAULT=/d' /etc/default/grub >/dev/null 2>&1 || true
 		fi
-	}
+		grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
+	fi
+}
 
 if [ "$ARCH" = "amd64" ]; then
 	echo "Install tracebox OpenMPTCProuter edition"
