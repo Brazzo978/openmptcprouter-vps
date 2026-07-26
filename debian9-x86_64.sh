@@ -2259,6 +2259,16 @@ else
 	echo "< OpenMPTCProuter VPS $OMR_VERSION >" > /etc/motd
 fi
 
+# Debian cloud images can enable networkd wait-online while the primary
+# interface is managed by ifupdown. With no local networkd configuration the
+# unit waits for two minutes and marks an otherwise healthy boot as degraded.
+if systemctl -q is-active networking.service 2>/dev/null \
+	&& ! find /etc/systemd/network /run/systemd/network -maxdepth 1 \
+		-type f -name '*.network' -print -quit 2>/dev/null | grep -q .; then
+	systemctl disable systemd-networkd-wait-online.service >/dev/null 2>&1 || true
+	systemctl reset-failed systemd-networkd-wait-online.service >/dev/null 2>&1 || true
+fi
+
 # Install the inert profile marker only after every required component and
 # configuration step has succeeded. It has no hooks or legacy dependencies;
 # the fresh-only guard uses its installed state on subsequent runs.
