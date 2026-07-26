@@ -124,8 +124,11 @@ MQVPN2=yes VPS_DOMAIN="put.your.domain.here" \
   /root/debian9-x86_64.sh
 ```
 
-With no `MQVPN2_BINARY_URL`, the installer builds the pinned upstream commit
-from source with the hybrid TCP lane and server TCP egress disabled:
+The branch includes a stripped, self-contained MQVPN2 artifact built from the
+pinned upstream commit and stability patch. The installer verifies its SHA-256
+before installation. With `MQVPN2_BUILD_FROM_SOURCE=yes`, the fallback build
+uses `/var/tmp` instead of memory-backed `/tmp` and disables the hybrid TCP lane
+and server TCP egress:
 
 ```text
 BUILD_TESTING=OFF
@@ -147,11 +150,11 @@ client package: it provides the 64-bit BBR2 loss-round counter, bounded idle
 timers and CUBIC defaults. FEC and XOR remain enabled because the client exposes
 the `backup_fec` scheduler; the hybrid TCP lane and egress remain disabled.
 
-No MQVPN2 artifact is included in this repository. An optional
-`MQVPN2_BINARY_URL` must point to a self-contained tarball containing
+An optional `MQVPN2_BINARY_URL` must point to a self-contained tarball containing
 `bin/mqvpn2`, `bin/mqvpn`, `mqvpn2`, or `mqvpn`; the installer always installs
 that executable as `/usr/local/bin/mqvpn2` and never imports bundled
-`libmqvpn` libraries.
+`libmqvpn` libraries. Set the matching `MQVPN2_BINARY_SHA256` when overriding
+the artifact.
 
 ## Glorytun swap helper
 

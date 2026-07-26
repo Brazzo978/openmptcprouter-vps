@@ -39,7 +39,9 @@ MQVPN2_PORT=${MQVPN2_PORT:-65412}
 MQVPN2_SUBNET=${MQVPN2_SUBNET:-10.255.248.0/24}
 MQVPN2_VERSION=${MQVPN2_VERSION:-0.14.0}
 MQVPN2_COMMIT=${MQVPN2_COMMIT:-535100137ad1931ab07d5ec4787f23744349b3e6}
+MQVPN2_BUILD_FROM_SOURCE=${MQVPN2_BUILD_FROM_SOURCE:-no}
 MQVPN2_BINARY_URL=${MQVPN2_BINARY_URL:-}
+MQVPN2_BINARY_SHA256=${MQVPN2_BINARY_SHA256:-d94ef9db51035a10470700ab2dec55067788f74550f8bf20572f0828dc8ce351}
 MQVPN2_PATCH_SHA256=4feb2d485c304c628aa2baff5c2707b1bb6e29024b2e9e317413945e14bbc124
 OPENVPN=${OPENVPN:-yes}
 OPENVPN_BONDING=${OPENVPN_BONDING:-no}
@@ -95,6 +97,8 @@ OMR_VPS_DEBIAN_GPG_URL=${OMR_VPS_DEBIAN_GPG_URL:-https://repoomr.3klab.com/openm
 OMR_VPS_ADMIN_GIT_URL=${OMR_VPS_ADMIN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/openmptcprouter-vps-admin.git}
 OMR_ADMIN_ARCHIVE_URL=${OMR_ADMIN_ARCHIVE_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}/openmptcprouter-vps-admin-${OMR_ADMIN_VERSION}.zip}
 MQVPN_BINARY_URL=${MQVPN_BINARY_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}/mqvpn-${MQVPN_VERSION}-linux-amd64.tar.gz}
+MQVPN2_BINARY_URL=${MQVPN2_BINARY_URL:-https://raw.githubusercontent.com/${OMR_GITHUB_ORG}/openmptcprouter-vps/${OMR_VPS_BRANCH}/mqvpn2-${MQVPN2_VERSION}-linux-amd64.tar.gz}
+[ "$MQVPN2_BUILD_FROM_SOURCE" = "yes" ] && MQVPN2_BINARY_URL=
 SHADOWSOCKS_GIT_URL=${SHADOWSOCKS_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/shadowsocks-libev.git}
 GLORYTUN_GIT_URL=${GLORYTUN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/glorytun.git}
 DSVPN_GIT_URL=${DSVPN_GIT_URL:-https://github.com/${OMR_GITHUB_ORG}/dsvpn.git}
@@ -1813,6 +1817,10 @@ if [ "$MQVPN2" = "yes" ]; then
 		rm -rf /tmp/mqvpn2-artifact
 		mkdir -p /tmp/mqvpn2-artifact
 		omr_fetch_file "$MQVPN2_ARTIFACT_SOURCE" /tmp/mqvpn2-artifact/mqvpn2.tar.gz
+		if ! printf '%s  %s\n' "$MQVPN2_BINARY_SHA256" /tmp/mqvpn2-artifact/mqvpn2.tar.gz | sha256sum -c -; then
+			echo 'ERROR: MQVPN2 artifact checksum mismatch'
+			exit 1
+		fi
 		tar xzf /tmp/mqvpn2-artifact/mqvpn2.tar.gz -C /tmp/mqvpn2-artifact
 		if [ -x /tmp/mqvpn2-artifact/bin/mqvpn2 ]; then
 			install -m 755 /tmp/mqvpn2-artifact/bin/mqvpn2 /usr/local/bin/mqvpn2
@@ -1829,9 +1837,10 @@ if [ "$MQVPN2" = "yes" ]; then
 		rm -rf /tmp/mqvpn2-artifact
 	else
 		apt-get install -y --no-install-recommends build-essential cmake pkg-config git libevent-dev patch
-		rm -rf /tmp/mqvpn2
-		git clone --recursive "$MQVPN2_GIT_URL" /tmp/mqvpn2
-		cd /tmp/mqvpn2
+		MQVPN2_SOURCE_DIR=/var/tmp/mqvpn2
+		rm -rf "$MQVPN2_SOURCE_DIR"
+		git clone --recursive "$MQVPN2_GIT_URL" "$MQVPN2_SOURCE_DIR"
+		cd "$MQVPN2_SOURCE_DIR"
 		git checkout --detach "$MQVPN2_COMMIT"
 		git submodule update --init --recursive
 		if [ "$(git rev-parse HEAD)" != "$MQVPN2_COMMIT" ]; then
@@ -1853,8 +1862,8 @@ if [ "$MQVPN2" = "yes" ]; then
 		fi
 		rm -f /tmp/mqvpn2-datagram-stability.patch
 		MQVPN2_JOBS=$(nproc 2>/dev/null || echo 4)
-		MQVPN2_BSSL_DIR=/tmp/mqvpn2/third_party/xquic/third_party/boringssl
-		MQVPN2_XQUIC_DIR=/tmp/mqvpn2/third_party/xquic
+		MQVPN2_BSSL_DIR="$MQVPN2_SOURCE_DIR/third_party/xquic/third_party/boringssl"
+		MQVPN2_XQUIC_DIR="$MQVPN2_SOURCE_DIR/third_party/xquic"
 		cmake -S "$MQVPN2_BSSL_DIR" -B "$MQVPN2_BSSL_DIR/build" \
 			-DBUILD_SHARED_LIBS=0 \
 			-DCMAKE_BUILD_TYPE=Release \
@@ -1870,16 +1879,16 @@ if [ "$MQVPN2" = "yes" ]; then
 			-DXQC_ENABLE_FEC=ON \
 			-DXQC_ENABLE_XOR=ON
 		cmake --build "$MQVPN2_XQUIC_DIR/build" --parallel "$MQVPN2_JOBS"
-		cmake -S /tmp/mqvpn2 -B /tmp/mqvpn2/build \
+		cmake -S "$MQVPN2_SOURCE_DIR" -B "$MQVPN2_SOURCE_DIR/build" \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DBUILD_TESTING=OFF \
 			-DMQVPN_ENABLE_HYBRID_TCP_LANE=OFF \
 			-DMQVPN_ENABLE_HYBRID_TCP_EGRESS=OFF \
 			-DXQUIC_BUILD_DIR="$MQVPN2_XQUIC_DIR/build"
-		cmake --build /tmp/mqvpn2/build --parallel "$MQVPN2_JOBS" --target mqvpn
-		install -m 755 /tmp/mqvpn2/build/mqvpn /usr/local/bin/mqvpn2
+		cmake --build "$MQVPN2_SOURCE_DIR/build" --parallel "$MQVPN2_JOBS" --target mqvpn
+		install -m 755 "$MQVPN2_SOURCE_DIR/build/mqvpn" /usr/local/bin/mqvpn2
 		cd "$DIR"
-		rm -rf /tmp/mqvpn2
+		rm -rf "$MQVPN2_SOURCE_DIR"
 	fi
 	if [ ! -x /usr/local/bin/mqvpn2 ]; then
 		echo 'ERROR: MQVPN2 install failed: /usr/local/bin/mqvpn2 not found'
