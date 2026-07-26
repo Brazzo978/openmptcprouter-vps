@@ -24,7 +24,8 @@ collect_udp_peers() {
     local port="$1"
     local proc="$2"
     ss -Huanp 2>/dev/null \
-        | awk -v port=":${port}" '($4 ~ port || $5 ~ port) && $5 != "*:*" { print $0 }' \
+        | awk -v port=":${port}" \
+            '($4 ~ port || $5 ~ port) && $5 !~ /(^|:)\*$/ { print $0 }' \
         | grep -F "$proc" 2>/dev/null \
         | awk '{print $5}' \
         | normalize_endpoint \
@@ -71,7 +72,7 @@ ovpn_tcp_peers="$(collect_tcp_peers 65301 openvpn || true)"
 ovpn_udp_peers="$(collect_udp_peers 65301 openvpn || true)"
 mqvpn_peers="$(collect_udp_peers 65411 mqvpn || true)"
 mqvpn2_peers="$(collect_udp_peers 65412 mqvpn || true)"
-dsvpn_peers="$(ss -Huanp 2>/dev/null | grep -F dsvpn 2>/dev/null | awk '$5 != "*:*" {print $5}' | normalize_endpoint | sort -u || true)"
+dsvpn_peers="$(ss -Huanp 2>/dev/null | grep -F dsvpn 2>/dev/null | awk '$5 !~ /(^|:)\*$/ {print $5}' | normalize_endpoint | sort -u || true)"
 
 current_vpns=()
 [ -n "$gt_tcp_peers" ] && current_vpns+=("glorytun_tcp")
