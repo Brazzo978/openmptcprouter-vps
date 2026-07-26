@@ -1,17 +1,19 @@
 [Unit]
-Description=MQVPN Server
+Description=MQVPN2 Experimental Server
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitBurst=3
 
 [Service]
 Type=simple
 ExecStartPre=/bin/sh -c 'modprobe tun 2>/dev/null || true; mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200; chmod 666 /dev/net/tun'
-ExecStart=/usr/local/bin/mqvpn --config /etc/mqvpn/server.conf
+ExecStart=/usr/local/bin/mqvpn2 --config /etc/mqvpn2/server.conf
 Restart=on-failure
-RestartSec=10
+RestartSec=15
+TimeoutStopSec=20
 ReadWritePaths=/dev/net/tun
+RuntimeDirectory=mqvpn2
 
 [Install]
 WantedBy=multi-user.target

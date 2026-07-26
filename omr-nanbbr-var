@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG="${NANBBR_CONFIG:-/etc/openmptcprouter-vps-admin/nanbbr-var.json}"
+LOCK="${NANBBR_LOCK:-/run/lock/omr-mptcp.lock}"
+SYS_MODULE_ROOT="${NANBBR_SYS_MODULE_ROOT:-/sys/module}"
+MODPROBE="${NANBBR_MODPROBE:-modprobe}"
+MODULES=(tcp_nanbbr1_var tcp_nanbbr2_var tcp_nanbbr3_var)
+
+[ -f "$CONFIG" ] || exit 0
+
+aggressiveness="$(
+	python3 - "$CONFIG" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="ascii") as config_file:
+        value = json.load(config_file)["aggressiveness"]
+    if isinstance(value, bool):
+        raise ValueError
+    value = int(value)
+    if not 1 <= value <= 100:
+        raise ValueError
+except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+    sys.exit(1)
+print(value)
+PY
+)" || {
+	logger -t omr-nanbbr-var "invalid aggressiveness config: $CONFIG" 2>/dev/null || true
+	exit 1
+}
+
+mkdir -p "$(dirname "$LOCK")"
+exec 9>"$LOCK"
+flock -x 9
+
+parameters=()
+old_values=()
+for module in "${MODULES[@]}"; do
+	"$MODPROBE" "$module" >/dev/null 2>&1 || true
+	parameter="$SYS_MODULE_ROOT/$module/parameters/aggressiveness"
+	[ -f "$parameter" ] && [ -w "$parameter" ] || continue
+	parameters+=("$parameter")
+	old_values+=("$(cat "$parameter")")
+done
+
+if [ "${#parameters[@]}" -eq 0 ]; then
+	logger -t omr-nanbbr-var "no NanBBR var aggressiveness parameter is available" 2>/dev/null || true
+	exit 1
+fi
+
+applied=0
+for parameter in "${parameters[@]}"; do
+	applied=$((applied + 1))
+	if ! printf '%s\n' "$aggressiveness" > "$parameter" \
+		|| [ "$(cat "$parameter")" != "$aggressiveness" ]; then
+		for ((index=applied - 1; index >= 0; index--)); do
+			printf '%s\n' "${old_values[$index]}" > "${parameters[$index]}" || true
+		done
+		logger -t omr-nanbbr-var "failed to apply aggressiveness=$aggressiveness" 2>/dev/null || true
+		exit 1
+	fi
+done
+
+logger -t omr-nanbbr-var \
+	"applied aggressiveness=$aggressiveness to ${#parameters[@]} module(s)" 2>/dev/null || true

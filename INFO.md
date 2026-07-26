@@ -36,7 +36,7 @@ When a WAN is marked `ERROR`, `post-tracking.d/002-error` does the following:
 - emits an iface hotplug `disconnecting` event
 - removes server routes attached to the failed WAN
 - marks Glorytun UDP path addresses as down when relevant
-- restarts the bound VPN service when needed (`openvpn`, `glorytun`, `glorytun-udp`, `mlvpn`, `dsvpn`)
+- restarts the bound VPN service when needed (`openvpn`, `glorytun`, `glorytun-udp`, `dsvpn`)
 - rebuilds default and server routes using the remaining healthy WANs
 
 Result:

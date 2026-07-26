@@ -108,6 +108,16 @@ _dsvpn() {
 	fi
 }
 
+_service_main_pid() {
+	service="$1"
+	main_pid="$(systemctl show -p MainPID --value "$service" 2>/dev/null)"
+	case "$main_pid" in
+		""|0|*[!0-9]*) return 1 ;;
+	esac
+	kill -0 "$main_pid" 2>/dev/null || return 1
+	echo "$main_pid"
+}
+
 _mqvpn() {
 	if systemctl list-unit-files mqvpn-server.service >/dev/null; then
 		[ -n "$(ip -6 r show 64:ff9b::/96 dev mqvpn0)" ] && ip -6 r del 64:ff9b::/96 dev mqvpn0 >/dev/null 2>&1
@@ -119,7 +129,7 @@ _mqvpn() {
 				[ -n "$subnet" ] && localip="$(echo "$subnet" | sed 's/\.0$/.1/')"
 			fi
 			remoteip="$(echo $localip | sed 's/\.1$/.2/')"
-			pid="$(pgrep -x mqvpn | head -n1)"
+			pid="$(_service_main_pid mqvpn-server.service || true)"
 			pid_age=0
 			[ -n "$pid" ] && pid_age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
 			[ -z "$pid_age" ] && pid_age=0
@@ -131,10 +141,47 @@ _mqvpn() {
 			else
 				fails=$((fails+1))
 				echo "$fails" > "$fail_file"
-				if { [ -z "$pid" ] && [ "$fails" -ge 2 ]; } || { [ -n "$pid" ] && [ "$pid_age" -ge 180 ] && [ "$fails" -ge 3 ]; }; then
-					logger -t "OMR-Service" "No answer from VPN client end ($fails failed probes, pid_age=${pid_age}s), restart MQVPN"
-					systemctl restart mqvpn-server.service
+				if [ -z "$pid" ] && [ "$fails" -ge 2 ]; then
+					logger -t "OMR-Service" "MQVPN process missing after $fails probes, request a bounded service start"
+					systemctl start mqvpn-server.service
 					echo 0 > "$fail_file"
+				elif [ -n "$pid" ] && [ "$fails" -eq 3 ]; then
+					logger -t "OMR-Service" "MQVPN peer probe failed; process is alive (pid_age=${pid_age}s), leaving recovery to MQVPN"
+				fi
+			fi
+		fi
+	fi
+}
+
+_mqvpn2() {
+	if systemctl list-unit-files mqvpn2-server.service >/dev/null; then
+		[ -n "$(ip -6 r show 64:ff9b::/96 dev mqvpn2)" ] && ip -6 r del 64:ff9b::/96 dev mqvpn2 >/dev/null 2>&1
+		if [ -f /etc/openmptcprouter-vps-admin/current-vpn ] && [ "$(cat /etc/openmptcprouter-vps-admin/current-vpn)" = "mqvpn2" ]; then
+			fail_file="/run/omr-mqvpn2-fail.count"
+			localip="10.255.248.1"
+			if [ -f /etc/mqvpn2/server.conf ]; then
+				subnet="$(sed -n 's/^[[:space:]]*Subnet[[:space:]]*=[[:space:]]*\(.*\)/\1/p' /etc/mqvpn2/server.conf | head -1 | cut -d/ -f1 | tr -d ' ')"
+				[ -n "$subnet" ] && localip="$(echo "$subnet" | sed 's/\.0$/.1/')"
+			fi
+			remoteip="$(echo $localip | sed 's/\.1$/.2/')"
+			pid="$(_service_main_pid mqvpn2-server.service || true)"
+			pid_age=0
+			[ -n "$pid" ] && pid_age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+			[ -z "$pid_age" ] && pid_age=0
+			fails=0
+			[ -f "$fail_file" ] && fails="$(cat "$fail_file" 2>/dev/null)"
+			[ -z "$fails" ] && fails=0
+			if ping -I mqvpn2 -c 3 -W 2 "$remoteip" >/dev/null 2>&1; then
+				echo 0 > "$fail_file"
+			else
+				fails=$((fails+1))
+				echo "$fails" > "$fail_file"
+				if [ -z "$pid" ] && [ "$fails" -ge 2 ]; then
+					logger -t "OMR-Service" "MQVPN2 process missing after $fails probes, request a bounded service start"
+					systemctl start mqvpn2-server.service
+					echo 0 > "$fail_file"
+				elif [ -n "$pid" ] && [ "$fails" -eq 3 ]; then
+					logger -t "OMR-Service" "MQVPN2 peer probe failed; process is alive (pid_age=${pid_age}s), leaving recovery to MQVPN2"
 				fi
 			fi
 		fi
@@ -301,6 +348,7 @@ while true; do
 	_v2ray
 	_dsvpn
 	_mqvpn
+	_mqvpn2
 	_softethervpn
 	_wireguard
 	_multipath

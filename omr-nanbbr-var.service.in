@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply OMR NanBBR var aggressiveness
+After=systemd-modules-load.service
+Before=omr.service omr-admin.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/omr-nanbbr-var
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
