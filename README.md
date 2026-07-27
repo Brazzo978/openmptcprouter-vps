@@ -68,14 +68,21 @@ VPS_DOMAIN="put.your.domain.here" /root/debian9-x86_64.sh
 ## Performance-oriented bpftune profile
 
 `bpftune` is enabled by default with an OpenMPTCProuter-specific profile. It
-loads the TCP buffer, network buffer and sysctl tuners, uses learning rate `3`
-(12.5%), and rolls changes back whenever the service stops. It can grow TCP
-buffers, network backlog and NAPI budgets when pressure is detected.
+loads the TCP buffer, network buffer and sysctl tuners and rolls changes back
+whenever the service stops. It can grow TCP buffers, network backlog and NAPI
+budgets when pressure is detected.
 Congestion-control, routing and neighbour tuners are not loaded, so bpftune
 cannot override OMR scheduler/CC policy or tune unrelated subsystems.
 
-Set `BPFTUNE=no` to disable it, or set `BPFTUNE_LEARNING_RATE` to a supported
-value from `0` (most conservative) through `4` (upstream default, 25%).
+The default `OMR_RESOURCE_TIER=auto` selects:
+
+- `standard` on the 2-vCPU/2-GB tier: learning rate `3` (12.5%).
+- `fast` on systems with at least 4 vCPUs and 3.5 GB RAM: learning rate `4`
+  (25%).
+
+The detected values are recorded in `/etc/omr-resource-profile`. Set
+`OMR_RESOURCE_TIER=standard|fast` to force a tier, `BPFTUNE=no` to disable the
+service, or `BPFTUNE_LEARNING_RATE=0..4` to override only its learning rate.
 
 ## Built-in health check
 

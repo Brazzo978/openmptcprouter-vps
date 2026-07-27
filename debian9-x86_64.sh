@@ -52,7 +52,8 @@ DSVPN=${DSVPN:-yes}
 WIREGUARD=${WIREGUARD:-yes}
 FAIL2BAN=${FAIL2BAN:-yes}
 BPFTUNE=${BPFTUNE:-yes}
-BPFTUNE_LEARNING_RATE=${BPFTUNE_LEARNING_RATE:-3}
+BPFTUNE_LEARNING_RATE=${BPFTUNE_LEARNING_RATE:-auto}
+OMR_RESOURCE_TIER=${OMR_RESOURCE_TIER:-auto}
 SOURCES=${SOURCES:-no}
 NOINTERNET=${NOINTERNET:-no}
 GRETUNNELS=${GRETUNNELS:-yes}
@@ -2175,6 +2176,30 @@ systemctl restart systemd-journald
 journalctl --vacuum-size=64M >/dev/null 2>&1 || true
 
 if [ "$BPFTUNE" = "yes" ]; then
+	OMR_CPU_COUNT=$(nproc 2>/dev/null || echo 1)
+	OMR_MEM_TOTAL_KB=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo)
+	[ -z "$OMR_MEM_TOTAL_KB" ] && OMR_MEM_TOTAL_KB=0
+	case "$OMR_RESOURCE_TIER" in
+		auto)
+			if [ "$OMR_CPU_COUNT" -ge 4 ] && [ "$OMR_MEM_TOTAL_KB" -ge 3500000 ]; then
+				OMR_RESOURCE_TIER=fast
+			else
+				OMR_RESOURCE_TIER=standard
+			fi
+			;;
+		standard|fast) ;;
+		*)
+			echo "E: OMR_RESOURCE_TIER must be auto, standard or fast." >&2
+			exit 1
+			;;
+	esac
+	if [ "$BPFTUNE_LEARNING_RATE" = "auto" ]; then
+		if [ "$OMR_RESOURCE_TIER" = "fast" ]; then
+			BPFTUNE_LEARNING_RATE=4
+		else
+			BPFTUNE_LEARNING_RATE=3
+		fi
+	fi
 	case "$BPFTUNE_LEARNING_RATE" in
 		0|1|2|3|4) ;;
 		*)
@@ -2182,6 +2207,12 @@ if [ "$BPFTUNE" = "yes" ]; then
 			exit 1
 			;;
 	esac
+	cat > /etc/omr-resource-profile <<-EOF
+		tier=${OMR_RESOURCE_TIER}
+		cpu_count=${OMR_CPU_COUNT}
+		memory_kb=${OMR_MEM_TOTAL_KB}
+		bpftune_learning_rate=${BPFTUNE_LEARNING_RATE}
+	EOF
 	apt-get -y install bpftune
 	mkdir -p /etc/systemd/system/bpftune.service.d
 	cat > /etc/systemd/system/bpftune.service.d/10-openmptcprouter.conf <<-EOF
