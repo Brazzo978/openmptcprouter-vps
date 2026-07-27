@@ -41,8 +41,9 @@ MQVPN2_VERSION=${MQVPN2_VERSION:-0.14.0}
 MQVPN2_COMMIT=${MQVPN2_COMMIT:-535100137ad1931ab07d5ec4787f23744349b3e6}
 MQVPN2_BUILD_FROM_SOURCE=${MQVPN2_BUILD_FROM_SOURCE:-no}
 MQVPN2_BINARY_URL=${MQVPN2_BINARY_URL:-}
-MQVPN2_BINARY_SHA256=${MQVPN2_BINARY_SHA256:-d94ef9db51035a10470700ab2dec55067788f74550f8bf20572f0828dc8ce351}
+MQVPN2_BINARY_SHA256=${MQVPN2_BINARY_SHA256:-bfaeacd9aaa5b245863cf6356f5a2711671810b5ac4687a321f06721a6f22078}
 MQVPN2_PATCH_SHA256=4feb2d485c304c628aa2baff5c2707b1bb6e29024b2e9e317413945e14bbc124
+MQVPN2_ROUTES_PATCH_SHA256=796744261a54ea3b758fd76ced7ce04b8370d307b9e5f967bdeeb46f083bb0ed
 OPENVPN=${OPENVPN:-yes}
 OPENVPN_BONDING=${OPENVPN_BONDING:-no}
 SOFTETHERVPN=${SOFTETHERVPN:-no}
@@ -1853,6 +1854,20 @@ if [ "$MQVPN2" = "yes" ]; then
 			exit 1
 		fi
 		rm -f /tmp/mqvpn2-datagram-stability.patch
+		MQVPN2_ROUTES_PATCH_SOURCE="${VPS_CONFIG_URL}${VPSPATH}/mqvpn2-client-routes.patch"
+		if [ "$LOCALFILES" = "yes" ] && [ -f "${DIR}/mqvpn2-client-routes.patch" ]; then
+			MQVPN2_ROUTES_PATCH_SOURCE="${DIR}/mqvpn2-client-routes.patch"
+		fi
+		omr_fetch_file "$MQVPN2_ROUTES_PATCH_SOURCE" /tmp/mqvpn2-client-routes.patch
+		if ! printf '%s  %s\n' "$MQVPN2_ROUTES_PATCH_SHA256" /tmp/mqvpn2-client-routes.patch | sha256sum -c -; then
+			echo 'ERROR: MQVPN2 client routes patch checksum mismatch'
+			exit 1
+		fi
+		if ! patch --batch --forward --fuzz=0 -p1 < /tmp/mqvpn2-client-routes.patch; then
+			echo "ERROR: MQVPN2 client routes patch does not apply to $MQVPN2_COMMIT"
+			exit 1
+		fi
+		rm -f /tmp/mqvpn2-client-routes.patch
 		MQVPN2_JOBS=$(nproc 2>/dev/null || echo 4)
 		MQVPN2_BSSL_DIR="$MQVPN2_SOURCE_DIR/third_party/xquic/third_party/boringssl"
 		MQVPN2_XQUIC_DIR="$MQVPN2_SOURCE_DIR/third_party/xquic"
