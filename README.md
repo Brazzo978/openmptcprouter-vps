@@ -65,6 +65,17 @@ VPS_DOMAIN="put.your.domain.here" /root/debian9-x86_64.sh
 - Removed legacy and newer stull that only makes confusion
 - fixed glorytun tcp/udp on debian 13 (now forced to use deb13)
 
+## Conservative bpftune profile
+
+`bpftune` is enabled by default with an OpenMPTCProuter-specific profile. It
+loads only the TCP buffer and sysctl tuners, uses learning rate `1` (3.125%),
+and rolls changes back whenever the service stops. Congestion-control, NAPI,
+routing and neighbour tuners are not loaded, so they cannot override OMR
+scheduler/CC policy or grow unrelated networking limits.
+
+Set `BPFTUNE=no` to disable it, or set `BPFTUNE_LEARNING_RATE` to a supported
+value from `0` (most conservative) through `4` (upstream default, 25%).
+
 ## Built-in health check
 
 The installer also installs `omr-check` automatically in `/usr/bin/omr-check`.

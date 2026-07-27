@@ -52,6 +52,7 @@ DSVPN=${DSVPN:-yes}
 WIREGUARD=${WIREGUARD:-yes}
 FAIL2BAN=${FAIL2BAN:-yes}
 BPFTUNE=${BPFTUNE:-yes}
+BPFTUNE_LEARNING_RATE=${BPFTUNE_LEARNING_RATE:-1}
 SOURCES=${SOURCES:-no}
 NOINTERNET=${NOINTERNET:-no}
 GRETUNNELS=${GRETUNNELS:-yes}
@@ -2174,8 +2175,23 @@ systemctl restart systemd-journald
 journalctl --vacuum-size=64M >/dev/null 2>&1 || true
 
 if [ "$BPFTUNE" = "yes" ]; then
+	case "$BPFTUNE_LEARNING_RATE" in
+		0|1|2|3|4) ;;
+		*)
+			echo "E: BPFTUNE_LEARNING_RATE must be between 0 and 4." >&2
+			exit 1
+			;;
+	esac
 	apt-get -y install bpftune
+	mkdir -p /etc/systemd/system/bpftune.service.d
+	cat > /etc/systemd/system/bpftune.service.d/10-openmptcprouter.conf <<-EOF
+		[Service]
+		ExecStart=
+		ExecStart=/usr/sbin/bpftune --rollback --learning_rate ${BPFTUNE_LEARNING_RATE} --allow tcp_buffer_tuner.so --allow sysctl_tuner.so
+	EOF
+	systemctl daemon-reload
 	systemctl enable bpftune
+	systemctl restart bpftune
 fi
 
 if [ "$TLS" = "yes" ]; then
