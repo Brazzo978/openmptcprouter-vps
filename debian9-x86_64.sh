@@ -71,7 +71,7 @@ GLORYTUN_TCP_VERSION="8aebb3efb3b108b1276aa74679e200e003f298de"
 GLORYTUN_TCP_BINARY_VERSION="0.0.35-6"
 OBFS_VERSION="486bebd9208539058e57e23a12f23103016e09b4"
 OBFS_BINARY_VERSION="0.0.5-1"
-OMR_ADMIN_VERSION="0.16+20260725-mqvpn14"
+OMR_ADMIN_VERSION="0.16+20260727-logging14"
 OMR_ADMIN_BINARY_VERSION="0.16+20260113"
 #OMR_ADMIN_BINARY_VERSION="0.3+20220827"
 DSVPN_VERSION="3b99d2ef6c02b2ef68b5784bec8adfdd55b29b1a"
@@ -2169,8 +2169,22 @@ if [ "$(ip r | awk '/default/&&/src/ {print $7}')" != "" ] && [ "$(ip r | awk '/
 	sed -i "s/MASQUERADE/SNAT($(ip r | awk '/default/&&/src/ {print $7}'))/" /etc/shorewall/snat
 fi
 
-# Limit /var/log/journal size
-sed -i 's/#SystemMaxUse=/SystemMaxUse=100M/' /etc/systemd/journald.conf
+# Bound persistent and volatile logs on small VPS disks.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/openmptcprouter-storage.conf <<-'EOF'
+	[Journal]
+	Compress=yes
+	SystemMaxUse=64M
+	SystemKeepFree=512M
+	SystemMaxFileSize=8M
+	RuntimeMaxUse=16M
+	RuntimeKeepFree=64M
+	RuntimeMaxFileSize=4M
+	MaxRetentionSec=14day
+	MaxFileSec=1day
+EOF
+systemctl restart systemd-journald
+journalctl --vacuum-size=64M >/dev/null 2>&1 || true
 
 if [ "$BPFTUNE" = "yes" ]; then
 	apt-get -y install bpftune
