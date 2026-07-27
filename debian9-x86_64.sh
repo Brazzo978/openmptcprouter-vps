@@ -119,8 +119,6 @@ REPO=${REPO:-repoomr.3klab.com}
 CHINA=${CHINA:-yes}
 
 OMR_VERSION="0.1156-def"
-GTUN_TCP_OMRDEV5_URL=${GTUN_TCP_OMRDEV5_URL:-}
-GTUN_TCP_OMRDEV5_PACKAGE=${GTUN_TCP_OMRDEV5_PACKAGE:-yes}
 
 DIR=$( pwd )
 #"
@@ -1010,22 +1008,11 @@ fi
 
 if [ "$LOCALFILES" = "no" ]; then
 	wget -O /usr/bin/omr-check ${VPS_CONFIG_URL}${VPSPATH}/omr-check
-	wget -O /usr/local/sbin/gtun-swap ${VPS_CONFIG_URL}${VPSPATH}/gtun-swap
 	chmod 755 /usr/bin/omr-check
 else
 	cp ${DIR}/omr-check /usr/bin/omr-check
-	cp ${DIR}/gtun-swap /usr/local/sbin/gtun-swap
 	chmod 755 /usr/bin/omr-check
 fi
-chmod 755 /usr/local/sbin/gtun-swap
-ln -sf /usr/local/sbin/gtun-swap /usr/bin/gtun-swap
-mkdir -p /usr/local/lib/gtun-swap
-[ -x /usr/local/bin/glorytun-tcp ] && cp -f /usr/local/bin/glorytun-tcp /usr/local/lib/gtun-swap/glorytun-tcp.original
-[ "$GTUN_TCP_OMRDEV5_PACKAGE" = "yes" ] && apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install omr-glorytun-tcp-omrdev5 >/dev/null 2>&1 || true
-[ -f /usr/lib/gtun-swap/glorytun-tcp.omrdev5 ] && cp -f /usr/lib/gtun-swap/glorytun-tcp.omrdev5 /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
-[ -f "${DIR}/bin/glorytun-tcp.omrdev5" ] && cp -f "${DIR}/bin/glorytun-tcp.omrdev5" /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
-[ -n "$GTUN_TCP_OMRDEV5_URL" ] && wget -O /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 "$GTUN_TCP_OMRDEV5_URL"
-[ -f /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5 ] && chmod 755 /usr/local/lib/gtun-swap/glorytun-tcp.omrdev5
 
 mkdir -p /etc/modules-load.d
 cat > /etc/modules-load.d/omr-tcp-cc.conf <<-EOF

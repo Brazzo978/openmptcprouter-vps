@@ -64,7 +64,6 @@ VPS_DOMAIN="put.your.domain.here" /root/debian9-x86_64.sh
 - Loads BPF MPTCP schedulers from `/usr/share/bpf/scheduler` Custom kernel based on the default one ,recompiled kernel with bpf support on the vps side.
 - Removed legacy and newer stull that only makes confusion
 - fixed glorytun tcp/udp on debian 13 (now forced to use deb13)
-- Installs `gtun-swap` for post-install Glorytun TCP binary swap tests (switch the default glorytun tcp with my own alpha version , my version is optimized to prefer stability over anything , switch needs to be done both on server and on client for things to work , will not affect other tunnel types).
 
 ## Built-in health check
 
@@ -156,26 +155,3 @@ An optional `MQVPN2_BINARY_URL` must point to a self-contained tarball containin
 that executable as `/usr/local/bin/mqvpn2` and never imports bundled
 `libmqvpn` libraries. Set the matching `MQVPN2_BINARY_SHA256` when overriding
 the artifact.
-
-## Glorytun swap helper
-
-`gtun-swap` is installed automatically on the VPS (`/usr/bin/gtun-swap`).
-
-It snapshots the current `glorytun-tcp` binary to:
-
-- `/usr/local/lib/gtun-swap/glorytun-tcp.original`
-
-Optional custom binary slot:
-
-- `/usr/local/lib/gtun-swap/glorytun-tcp.omrdev5`
-
-On `0.1150`, installer also tries to install `omr-glorytun-tcp-omrdev5` from your APT repo and auto-populates the slot.
-
-Usage:
-
-```bash
-gtun-swap status
-gtun-swap import /root/glorytun-2.0.0-omrdev5-linux-glibc
-gtun-swap omrdev5
-gtun-swap orig
-```
