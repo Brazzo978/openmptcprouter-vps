@@ -1,0 +1,7 @@
+/.review/
+/cc/work/
+/cc/packages/
+/cc/__pycache__/
+/debian/*.deb
+/debian/omr-vps-admin-3k.json
+/admin/__pycache__/

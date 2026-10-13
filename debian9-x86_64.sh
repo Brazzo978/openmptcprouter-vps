@@ -92,7 +92,8 @@ UBOND_VERSION="31af0f69ebb6d07ed9348dca2fced33b956cedee"
 OBFS_VERSION="486bebd9208539058e57e23a12f23103016e09b4"
 OBFS_BINARY_VERSION="0.0.5-1"
 OMR_ADMIN_VERSION="11d4cab42c32218becf842d880fd419d3d1bb5dd"
-OMR_ADMIN_BINARY_VERSION="0.18+20260910"
+OMR_ADMIN_BINARY_VERSION="${OMR_ADMIN_BINARY_VERSION:-0.18+20260910}"
+OMR_ADMIN_LOCAL_DEB="${OMR_ADMIN_LOCAL_DEB:-}"
 DSVPN_VERSION="3b99d2ef6c02b2ef68b5784bec8adfdd55b29b1a"
 DSVPN_BINARY_VERSION="0.1.4-2"
 MQVPN_VERSION="0.16.2-1"
@@ -120,6 +121,32 @@ OMR_VERSION="0.1081"
 DIR=$( pwd )
 #"
 set -e
+OMR_3K_FROZEN=${OMR_3K_FROZEN:-yes}
+if [ "$OMR_3K_FROZEN" = "yes" ]; then
+    if [ ! -f "$DIR/frozen/omr-amd64.lock.json" ] ||
+       [ ! -f "$DIR/frozen/assets/Packages.gz" ] ||
+       ! python3 "$DIR/frozen/freeze.py" verify; then
+        echo "OMR 3K frozen bundle missing or modified; use reviewed run-vps-3k bundle" >&2
+        exit 1
+    fi
+    if [ -z "${OMR_3K_KERNEL_IMAGE_DEB:-}" ] ||
+       [ -z "${OMR_3K_KERNEL_HEADERS_DEB:-}" ] ||
+       [ ! -f "$DIR/cc/verify-3k-kernel.py" ] ||
+       [ ! -f "$OMR_3K_KERNEL_IMAGE_DEB" ] ||
+       [ ! -f "$OMR_3K_KERNEL_HEADERS_DEB" ] ||
+       ! python3 "$DIR/cc/verify-3k-kernel.py" "$OMR_3K_KERNEL_IMAGE_DEB" "$OMR_3K_KERNEL_HEADERS_DEB"; then
+        echo "OMR 3K frozen install requires the reviewed custom kernel pair" >&2
+        exit 1
+    fi
+    if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261013-3k1" ] ||
+       [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
+       [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
+       [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ]; then
+        echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
+        exit 1
+    fi
+fi
 umask 0022
 export LC_ALL=C
 export PATH=$PATH:/sbin
@@ -353,9 +380,45 @@ if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "20.04" ] && [ "$UPDATE_OS" = "yes"
 	VERSION_ID="22.04"
 fi
 
-# Add OpenMPTCProuter repo
+# The 3K release consumes only the audited OMR deb bundle. Debian 13
+# distribution and security packages continue to use Debian repositories.
 echo "Add OpenMPTCProuter repo..."
-if [ "$CHINA" = "yes" ]; then
+if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then
+    if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "13" ] || [ "$ARCH" != "amd64" ] ||
+       [ "$LOCALFILES" != "yes" ] || [ "$SOURCES" != "no" ] || [ "$CHINA" != "no" ]; then
+        echo "3K frozen release requires Debian 13 amd64, LOCALFILES=yes, SOURCES=no, CHINA=no" >&2
+        exit 1
+    fi
+    FROZEN_SOURCE="$DIR/frozen"
+    FROZEN_INSTALL="/usr/share/omr-server-3k/frozen"
+    if [ ! -f "$FROZEN_SOURCE/omr-amd64.lock.json" ] ||
+       [ ! -f "$FROZEN_SOURCE/assets/Packages.gz" ] ||
+       ! python3 "$FROZEN_SOURCE/freeze.py" verify; then
+        echo "3K frozen OMR assets are incomplete or modified" >&2
+        exit 1
+    fi
+    mkdir -p /usr/share/omr-server-3k
+    mkdir -p "$FROZEN_INSTALL"
+    cp -a "$FROZEN_SOURCE/." "$FROZEN_INSTALL/"
+    chmod -R a+rX "$FROZEN_INSTALL"
+    python3 "$FROZEN_INSTALL/freeze.py" verify
+    echo "deb [trusted=yes arch=amd64] file:$FROZEN_INSTALL/assets ./" > /etc/apt/sources.list.d/openmptcprouter.list
+    rm -f /etc/apt/sources.list.d/openmptcprouter-test.list
+    rm -f /etc/apt/preferences.d/openmptcprouter.pref
+    python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/apt/preferences.d/openmptcprouter-3k-frozen.pref <<'PYFROZENPINS'
+import json, sys
+for package in json.load(open(sys.argv[1]))["packages"]:
+    print("Package: " + package["package"])
+    print("Pin: version " + package["version"])
+    print("Pin-Priority: 1001")
+    print()
+PYFROZENPINS
+    python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/omr-vps-3k-frozen.json <<'PYFROZENMARKER'
+import hashlib, json, sys
+path = sys.argv[1]
+print(json.dumps({"release": "0.64.2-3K", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
+PYFROZENMARKER
+elif [ "$CHINA" = "yes" ]; then
 	echo "Install git..."
 	apt-get -y install git
 	rm -rf /var/lib/openmptcprouter-vps-debian 
@@ -773,22 +836,54 @@ elif [ "$KERNEL" = "6.18" ]; then
 	#dpkg --force-all -i -B /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
 	#dpkg --force-all -i -B /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
 	#set_grub_default_kernel "${KERNEL_VERSION}" "${PSABI}-xanmod"
-	KERNEL_VERSION="6.18.41"
-	KERNEL_REV="20260730"
-	#if [ "$CHINA" = "yes" ]; then
-	#	wget -O /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-	#	wget -O /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
-	#else
-	wget -O /tmp/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb ${VPSURL}kernel/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
-	if [ "$ARCH" = "amd64" ]; then
-		wget -O /tmp/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb ${VPSURL}kernel/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+	if [ "${OMR_3K_FROZEN:-no}" = "yes" ] && {
+		[ -z "${OMR_3K_KERNEL_IMAGE_DEB:-}" ] || [ -z "${OMR_3K_KERNEL_HEADERS_DEB:-}" ];
+	}; then
+		echo "Frozen 3K VPS install requires the reviewed image and headers pair" >&2
+		exit 1
 	fi
-	echo "Install kernel linux-image-${KERNEL_VERSION}-${PSABI}-omr source release"
-	if [ "$ARCH" = "amd64" ]; then
-		dpkg --force-all -i -B /tmp/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+	if [ -n "${OMR_3K_KERNEL_IMAGE_DEB:-}" ]; then
+		# A 3K VPS needs the matching OMR/XanMod kernel with custom CC.
+		[ -f "$OMR_3K_KERNEL_IMAGE_DEB" ] && [ -f "$OMR_3K_KERNEL_HEADERS_DEB" ] || {
+			echo "Missing local 3K VPS kernel image/headers package" >&2
+			exit 1
+		}
+		image_pkg="$(dpkg-deb -f "$OMR_3K_KERNEL_IMAGE_DEB" Package)"
+		headers_pkg="$(dpkg-deb -f "$OMR_3K_KERNEL_HEADERS_DEB" Package)"
+		kernel_release="$(printf '%s' "$image_pkg" | sed 's/^linux-image-//')"
+		case "$kernel_release" in
+			6.18.41-20261013.x64v3-omr-3k) ;;
+			*) echo "Unexpected 3K kernel release: $kernel_release" >&2; exit 1 ;;
+		esac
+		[ "$PSABI" = "x64v3" ] || { echo "3K kernel requires x64v3" >&2; exit 1; }
+		[ "$headers_pkg" = "linux-headers-$kernel_release" ] || {
+			echo "3K kernel image and headers release mismatch" >&2
+			exit 1
+		}
+		[ "$(dpkg-deb -f "$OMR_3K_KERNEL_IMAGE_DEB" Architecture)" = "$ARCH" ] || exit 1
+		[ "$(dpkg-deb -f "$OMR_3K_KERNEL_HEADERS_DEB" Architecture)" = "$ARCH" ] || exit 1
+		[ "$(dpkg-deb -f "$OMR_3K_KERNEL_IMAGE_DEB" Version)" = "$(dpkg-deb -f "$OMR_3K_KERNEL_HEADERS_DEB" Version)" ] || exit 1
+		dpkg -i -B "$OMR_3K_KERNEL_HEADERS_DEB" || exit 1
+		dpkg -i -B "$OMR_3K_KERNEL_IMAGE_DEB" || exit 1
+		set_grub_default_kernel "6.18.41" "3k" || exit 1
+	else
+		KERNEL_VERSION="6.18.41"
+		KERNEL_REV="20260730"
+		#if [ "$CHINA" = "yes" ]; then
+		#	wget -O /tmp/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-image-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
+		#	wget -O /tmp/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb https://sourceforge.net/projects/xanmod/files/releases/lts/${KERNEL_VERSION}-xanmod1/${KERNEL_VERSION}-${PSABI}-xanmod1/linux-headers-${KERNEL_VERSION}-${PSABI}-xanmod1_${KERNEL_VERSION}-${PSABI}-xanmod1-${KERNEL_REV}_amd64.deb
+		#else
+		wget -O /tmp/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb ${VPSURL}kernel/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+		if [ "$ARCH" = "amd64" ]; then
+			wget -O /tmp/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb ${VPSURL}kernel/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+		fi
+		echo "Install kernel linux-image-${KERNEL_VERSION}-${PSABI}-omr source release"
+		if [ "$ARCH" = "amd64" ]; then
+			dpkg --force-all -i -B /tmp/linux-headers-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+		fi
+		dpkg --force-all -i -B /tmp/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
+		set_grub_default_kernel "${KERNEL_VERSION}" "${PSABI}-omr"
 	fi
-	dpkg --force-all -i -B /tmp/linux-image-${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${KERNEL_VERSION}-${KERNEL_REV}.${PSABI}-omr_${ARCH}.deb
-	set_grub_default_kernel "${KERNEL_VERSION}" "${PSABI}-omr"
 elif [ "$KERNEL" = "6.6" ] && [ "$ID" = "debian" ]; then
 	echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/bookworm-backports.list
 	apt-get update
@@ -815,15 +910,23 @@ if [ "$KERNEL" = "6.18" ]; then
 	
 	echo "Install MPTCP BPF schedulers for kernel 6.18..."
 	for pkg in mptcp-bpf-bkup mptcp-bpf-burst mptcp-bpf-first mptcp-bpf-red mptcp-bpf-rr mptcp-bpf-dscp mptcp-bpf-weight mptcp-bpf-weight-rr; do
-		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install ${pkg}=${MPTCP_BPF_VERSION}; then
+		pkg_version="$MPTCP_BPF_VERSION"
+		[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && [ "$pkg" = "mptcp-bpf-weight" ] && pkg_version="1.1-1"
+		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install ${pkg}=${pkg_version}; then
+			if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then echo "Frozen package install failed: ${pkg}=${pkg_version}" >&2; exit 1; fi
 			wget -O /tmp/${pkg}_${MPTCP_BPF_VERSION}_${ARCH}.deb ${VPSURL}debian/${pkg}_${MPTCP_BPF_VERSION}_${ARCH}.deb
 			dpkg --force-confold --force-confdef --force-overwrite -i /tmp/${pkg}_${MPTCP_BPF_VERSION}_${ARCH}.deb
 			rm -f /tmp/${pkg}_${MPTCP_BPF_VERSION}_${ARCH}.deb
 		fi
 	done
 	echo "Install MPTCP BPF DSCP and weight scheduler manager scripts..."
-	wget -O /usr/sbin/mptcp-scheduler-dscp.sh https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/mptcp-dscp-manager/files/usr/sbin/mptcp-scheduler-dscp.sh
-	wget -O /usr/sbin/mptcp-scheduler-weight.sh https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/mptcp-weight-manager/files/usr/sbin/mptcp-scheduler-weight.sh
+	if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then
+		install -m 0755 "$FROZEN_INSTALL/helpers/mptcp-scheduler-dscp.sh" /usr/sbin/mptcp-scheduler-dscp.sh
+		install -m 0755 "$FROZEN_INSTALL/helpers/mptcp-scheduler-weight.sh" /usr/sbin/mptcp-scheduler-weight.sh
+	else
+		wget -O /usr/sbin/mptcp-scheduler-dscp.sh https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/mptcp-dscp-manager/files/usr/sbin/mptcp-scheduler-dscp.sh
+		wget -O /usr/sbin/mptcp-scheduler-weight.sh https://github.com/Ysurac/openmptcprouter-feeds/raw/refs/heads/develop/mptcp-weight-manager/files/usr/sbin/mptcp-scheduler-weight.sh
+	fi
 	chmod 755 /usr/sbin/mptcp-scheduler-dscp.sh /usr/sbin/mptcp-scheduler-weight.sh
 fi
 
@@ -1221,7 +1324,10 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 			OMR_ADMIN_PASS_ADMIN2=$(cat /etc/openmptcprouter-vps-admin/omr-admin-config.json | jq -r .users[0].admin.user_password | tr -d "\n")
 			[ -n "$OMR_ADMIN_PASS_ADMIN2" ] && [ "$OMR_ADMIN_PASS_ADMIN2" != "AdminMySecretKey" ] && OMR_ADMIN_PASS_ADMIN=$OMR_ADMIN_PASS_ADMIN2
 		fi
-		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y --allow-downgrades install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}; then
+		if [ -n "$OMR_ADMIN_LOCAL_DEB" ]; then
+			[ -f "$OMR_ADMIN_LOCAL_DEB" ] || { echo "Missing local 3K API package: $OMR_ADMIN_LOCAL_DEB" >&2; exit 1; }
+			apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y --allow-downgrades install "$OMR_ADMIN_LOCAL_DEB"
+		elif ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y --allow-downgrades install omr-vps-admin=${OMR_ADMIN_BINARY_VERSION}; then
 			wget -O /tmp/omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb ${VPSURL}debian/omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb
 			# Unlike the apt call above, dpkg resolves no dependency: pull
 			# anything the deb needs and is missing (nftables, python3-*)
@@ -1467,6 +1573,7 @@ if [ "$SHADOWSOCKS_GO" = "yes" ]; then
 		fi
 	else
 		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install shadowsocks-go=${SHADOWSOCKS_GO_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/shadowsocks-go-${SHADOWSOCKS_GO_VERSION}-${ARCH}.deb ${VPSURL}debian/shadowsocks-go-${SHADOWSOCKS_GO_VERSION}-${ARCH}.deb
 			dpkg --force-confold --force-confdef --force-overwrite -i /tmp/shadowsocks-go-${SHADOWSOCKS_GO_VERSION}-${ARCH}.deb
 			rm -f /tmp/shadowsocks-go-${SHADOWSOCKS_GO_VERSION}-${ARCH}.deb
@@ -1539,6 +1646,7 @@ if [ "$V2RAY" = "yes" ]; then
 #		fi
 	else
 		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y install v2ray=${V2RAY_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/v2ray-${V2RAY_VERSION}-${ARCH}.deb ${VPSURL}debian/v2ray-${V2RAY_VERSION}-${ARCH}.deb
 			dpkg --force-confold --force-confdef --force-overwrite -i /tmp/v2ray-${V2RAY_VERSION}-${ARCH}.deb
 			rm -f /tmp/v2ray-${V2RAY_VERSION}-${ARCH}.deb
@@ -1601,6 +1709,7 @@ if [ "$XRAY" = "yes" ]; then
 		fi
 	else
 		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" -y --allow-downgrades install xray=${XRAY_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/xray-${XRAY_VERSION}-${ARCH}.deb ${VPSURL}debian/xray-${XRAY_VERSION}-${ARCH}.deb
 			dpkg --force-confold --force-confdef --force-overwrite -i /tmp/xray-${XRAY_VERSION}-${ARCH}.deb
 			rm -f /tmp/xray-${XRAY_VERSION}-${ARCH}.deb
@@ -1892,6 +2001,24 @@ if [ "$WIREGUARD" = "yes" ]; then
 		EOF
 	fi
 	if [ ! -f /root/wireguard-client.conf ]; then
+		# The router is not necessarily paired yet. Use its default LAN until
+		# provisioned LAN prefixes are available in the admin configuration.
+		WG_LAN_ALLOWED=$(python3 -c '
+import ipaddress, json, sys
+try:
+    with open(sys.argv[1]) as stream:
+        users = json.load(stream).get("users", [])
+    lanips = users[0].get("openmptcprouter", {}).get("lanips", []) if users else []
+    networks = []
+    for lan in lanips:
+        network = ipaddress.ip_network(str(lan), strict=False)
+        if network.version == 4 and network.is_private and network.prefixlen >= 16:
+            networks.append(str(network))
+    print(", ".join(dict.fromkeys(networks[:16])))
+except (OSError, ValueError, TypeError, KeyError, IndexError):
+    pass
+' /etc/openmptcprouter-vps-admin/omr-admin-config.json 2>/dev/null)
+		[ -n "$WG_LAN_ALLOWED" ] || WG_LAN_ALLOWED="192.168.100.0/24"
 		cat > /root/wireguard-client.conf <<-EOF
 		[Interface]
 		Address = 10.255.246.2/24
@@ -1900,10 +2027,29 @@ if [ "$WIREGUARD" = "yes" ]; then
 		[Peer]
 		PublicKey = $(cat /etc/wireguard/vpn-server-public.key | tr -d "\n")
 		Endpoint = ${VPS_PUBLIC_IP}:65312
-		AllowedIPs = 0.0.0.0/0, ::/0, 192.168.100.0/24
+		AllowedIPs = 10.255.0.0/16, ${WG_LAN_ALLOWED}
+		PersistentKeepalive = 25
 		EOF
 	fi
 	systemctl enable wg-quick@client-wg0
+	# Forwarding to the router LAN uses a dedicated policy table and is refreshed
+	# after OMR has synced its LAN prefixes and established the VPN tunnel.
+	if [ "$LOCALFILES" = "yes" ]; then
+		for wg_file in wg-remote-lan-route wg-remote-lan-route.service.in wg-remote-lan-route.timer.in; do
+			[ -f "$DIR/$wg_file" ] || { echo "Missing local WireGuard helper: $DIR/$wg_file" >&2; exit 1; }
+		done
+		install -m 0755 "$DIR/wg-remote-lan-route" /usr/local/sbin/wg-remote-lan-route
+		install -m 0644 "$DIR/wg-remote-lan-route.service.in" /etc/systemd/system/wg-remote-lan-route.service
+		install -m 0644 "$DIR/wg-remote-lan-route.timer.in" /etc/systemd/system/wg-remote-lan-route.timer
+	else
+		wget -O /usr/local/sbin/wg-remote-lan-route "${VPSURL}${VPSPATH}/wg-remote-lan-route"
+		wget -O /etc/systemd/system/wg-remote-lan-route.service "${VPSURL}${VPSPATH}/wg-remote-lan-route.service.in"
+		wget -O /etc/systemd/system/wg-remote-lan-route.timer "${VPSURL}${VPSPATH}/wg-remote-lan-route.timer.in"
+		chmod 0755 /usr/local/sbin/wg-remote-lan-route
+		chmod 0644 /etc/systemd/system/wg-remote-lan-route.service /etc/systemd/system/wg-remote-lan-route.timer
+	fi
+	systemctl daemon-reload
+	systemctl enable --now wg-remote-lan-route.timer
 	echo "Install wireguard done"
 fi
 
@@ -1917,6 +2063,7 @@ if [ "$MQVPN" = "yes" ]; then
 	rm -f /var/lib/dpkg/lock-frontend
 	if [ "$ARCH" = "amd64" ]; then
 		if ! apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-overwrite" --allow-downgrades -y install mqvpn=${MQVPN_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/mqvpn_${MQVPN_VERSION}_${ARCH}.deb ${VPSURL}debian/mqvpn_${MQVPN_VERSION}_${ARCH}.deb
 			wget -O /tmp/libmqvpn0_${MQVPN_VERSION}_${ARCH}.deb ${VPSURL}debian/libmqvpn0_${MQVPN_VERSION}_${ARCH}.deb
 			apt-get -y install libevent-2.1-7
@@ -2210,6 +2357,7 @@ if [ "$GLORYTUN_UDP" = "yes" ]; then
 	else
 		rm -f /usr/local/bin/glorytun
 		if ! apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun=${GLORYTUN_UDP_BINARY_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/omr-glorytun-${GLORYTUN_UDP_BINARY_VERSION}.deb ${VPSURL}debian/omr-glorytun_${GLORYTUN_UDP_BINARY_VERSION}_amd64.deb
 			dpkg --force-confdef --force-confold --force-overwrite -i /tmp/omr-glorytun-${GLORYTUN_UDP_BINARY_VERSION}.deb
 			rm -f /tmp/omr-glorytun-${GLORYTUN_UDP_BINARY_VERSION}.deb
@@ -2267,6 +2415,7 @@ if [ "$DSVPN" = "yes" ]; then
 		rm -rf /tmp/dsvpn
 	else
 		if ! apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install omr-dsvpn=${DSVPN_BINARY_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/omr-dsvpn-${DSVPN_BINARY_VERSION}.deb ${VPSURL}debian/omr-dsvpn_${DSVPN_BINARY_VERSION}_amd64.deb
 			dpkg --force-confdef --force-confold --force-overwrite -i /tmp/omr-dsvpn-${DSVPN_BINARY_VERSION}.deb
 			rm -f /tmp/omr-dsvpn-${DSVPN_BINARY_VERSION}.deb
@@ -2359,6 +2508,7 @@ if [ "$GLORYTUN_TCP" = "yes" ]; then
 	else
 		rm -f /usr/local/bin/glorytun-tcp
 		if ! apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-overwrite" install --reinstall omr-glorytun-tcp=${GLORYTUN_TCP_BINARY_VERSION}; then
+			[ "${OMR_3K_FROZEN:-yes}" = "yes" ] && { echo "Frozen OMR APT install failed; refusing network fallback" >&2; exit 1; }
 			wget -O /tmp/omr-glorytun-tcp-${GLORYTUN_TCP_BINARY_VERSION}.deb ${VPSURL}debian/omr-glorytun-tcp_${GLORYTUN_TCP_BINARY_VERSION}_amd64.deb
 			dpkg --force-confdef --force-confold --force-overwrite -i /tmp/omr-glorytun-tcp-${GLORYTUN_TCP_BINARY_VERSION}.deb
 			rm -f /tmp/omr-glorytun-tcp-${GLORYTUN_TCP_BINARY_VERSION}.deb
@@ -2620,7 +2770,18 @@ if [ "$TLS" = "yes" ]; then
 		if [ ! -f "/root/.acme.sh/$VPS_DOMAIN/$VPS_DOMAIN.cer" ]; then
 			echo "Generate certificate for V2Ray"
 			set +e
-			curl https://get.acme.sh | sh
+			if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then
+				sh "$FROZEN_INSTALL/helpers/acme.sh" --install --home /root/.acme.sh --no-profile
+				if [ -f /root/.acme.sh/account.conf ]; then
+					if grep -q '^AUTO_UPGRADE=' /root/.acme.sh/account.conf; then
+						sed -i "s/^AUTO_UPGRADE=.*/AUTO_UPGRADE='0'/" /root/.acme.sh/account.conf
+					else
+						printf "AUTO_UPGRADE='0'\n" >> /root/.acme.sh/account.conf
+					fi
+				fi
+			else
+				curl https://get.acme.sh | sh
+			fi
 			~/.acme.sh/acme.sh --force --alpn --issue -d $VPS_DOMAIN --pre-hook 'nft add rule inet omr install_tmp tcp dport 443 accept >/dev/null 2>&1' --post-hook 'nft flush chain inet omr install_tmp >/dev/null 2>&1' >/dev/null 2>&1
 			set -e
 			if [ -f /root/.acme.sh/$VPS_DOMAIN/$VPS_DOMAIN.cer ]; then
@@ -2672,7 +2833,9 @@ else
 fi
 
 if [ "$SOURCES" != "yes" ]; then
-	apt-get -y install omr-server=${OMR_VERSION} >/dev/null 2>&1 || true
+	if [ "${OMR_3K_FROZEN:-yes}" != "yes" ]; then
+		apt-get -y install omr-server=${OMR_VERSION} >/dev/null 2>&1 || true
+	fi
 	rm -f /etc/openmtpcprouter-vps-admin/update-bin
 fi
 

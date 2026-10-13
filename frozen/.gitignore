@@ -1,0 +1,4 @@
+assets/*.deb
+assets/Packages
+assets/Packages.gz
+__pycache__/

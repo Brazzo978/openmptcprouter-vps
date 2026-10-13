@@ -1,0 +1,93 @@
+From f0ac7e5122cac378430104e00cdc64e7be5d612c Mon Sep 17 00:00:00 2001
+From: Alexandre Frade <kernel@xanmod.org>
+Date: Wed, 15 Jun 2022 17:07:29 +0000
+Subject: [PATCH 16/20] XANMOD: sched/autogroup: Add kernel parameter and
+ config option to enable/disable autogroup feature by default
+
+Signed-off-by: Alexandre Frade <kernel@xanmod.org>
+---
+ Documentation/admin-guide/kernel-parameters.txt |  6 ++++--
+ init/Kconfig                                    | 12 ++++++++++++
+ kernel/sched/autogroup.c                        |  9 ++++++---
+ 3 files changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index 6c42061ca20e..1eac32cab5a0 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -510,6 +510,10 @@
+ 			Format: <int> (must be >=0)
+ 			Default: 64
+ 
++	autogroup=	[KNL] Enable or disable scheduler automatic task group
++			creation.
++			Format: <bool>
++
+ 	bau=		[X86_UV] Enable the BAU on SGI UV.  The default
+ 			behavior is to disable the BAU (i.e. bau=0).
+ 			Format: { "0" | "1" }
+@@ -4239,8 +4243,6 @@
+ 
+ 	noapictimer	[APIC,X86] Don't set up the APIC timer
+ 
+-	noautogroup	Disable scheduler automatic task group creation.
+-
+ 	nocache		[ARM,EARLY]
+ 
+ 	no_console_suspend
+diff --git a/init/Kconfig b/init/Kconfig
+index cab3ad28ca49..a263dfb0ac3d 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1435,6 +1435,18 @@ config SCHED_AUTOGROUP
+ 	  desktop applications.  Task group autogeneration is currently based
+ 	  upon task session.
+ 
++config SCHED_AUTOGROUP_DEFAULT_ENABLED
++	bool "Enable automatic process group scheduling feature"
++	default y
++	depends on SCHED_AUTOGROUP
++	help
++	  If set, automatic process group scheduling will be enabled per
++	  default but can be disabled through passing autogroup=0 on the
++	  kernel commandline during boot or a value of 0 via the file
++	  proc/sys/kernel/sched_autogroup_enabled.
++
++	  If unsure say Y.
++
+ config RELAY
+ 	bool "Kernel->user space relay support (formerly relayfs)"
+ 	select IRQ_WORK
+diff --git a/kernel/sched/autogroup.c b/kernel/sched/autogroup.c
+index cdea931aae30..20fb00bf6157 100644
+--- a/kernel/sched/autogroup.c
++++ b/kernel/sched/autogroup.c
+@@ -7,7 +7,8 @@
+ #include "autogroup.h"
+ #include "sched.h"
+ 
+-unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
++unsigned int __read_mostly sysctl_sched_autogroup_enabled =
++		IS_ENABLED(CONFIG_SCHED_AUTOGROUP_DEFAULT_ENABLED) ? 1 : 0;
+ static struct autogroup autogroup_default;
+ static atomic_t autogroup_seq_nr;
+ 
+@@ -222,11 +223,13 @@ void sched_autogroup_exit(struct signal_struct *sig)
+ 
+ static int __init setup_autogroup(char *str)
+ {
+-	sysctl_sched_autogroup_enabled = 0;
++	unsigned long enabled;
++	if (!kstrtoul(str, 0, &enabled))
++		sysctl_sched_autogroup_enabled = enabled ? 1 : 0;
+ 
+ 	return 1;
+ }
+-__setup("noautogroup", setup_autogroup);
++__setup("autogroup=", setup_autogroup);
+ 
+ #ifdef CONFIG_PROC_FS
+ 
+-- 
+2.47.2
+

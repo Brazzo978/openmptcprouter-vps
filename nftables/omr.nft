@@ -50,6 +50,7 @@
 table inet omr {
 	chain user_accept {}
 	chain user_dnat {}
+	chain rpf_dnat_bypass {}
 	chain gre_snat {}
 	chain client2client {}
 	chain dscp_mark {}
@@ -139,6 +140,7 @@ table inet omr {
 	# names -- hence nat_prerouting/nat_postrouting below.)
 	chain nat_prerouting {
 		type nat hook prerouting priority dstnat; policy accept;
+		jump rpf_dnat_bypass
 		jump custom_dnat_bypass                                 # admin-owned escape hatch, checked first -- a match here `accept`s (i.e. skips NAT) and never reaches user_dnat below
 		jump user_dnat
 		# Bulk "redirect ports 1-64999 to the router" toggle -- disabled by
@@ -152,6 +154,14 @@ table inet omr {
 
 	chain nat_postrouting {
 		type nat hook postrouting priority srcnat; policy accept;
+
+		# A road-warrior WireGuard client enters through client-wg0 and must
+		# return through the same OMR tunnel. Translate only traffic that is
+		# actually routed into an OMR VPN interface; the public WAN remains
+		# governed by the existing masquerade rule below. In particular this
+		# lets 10.255.246.2 reach the router tunnel IP or its LAN GUI without
+		# requiring a return route to the road-warrior subnet on the router.
+		iifname $VPNCL_IFACES oifname $VPN_IFACES ip saddr 10.255.246.0/24 masquerade
 
 		# shorewall4/snat: MASQUERADE for all tunnel-client subnets + RFC1918/
 		# link-local, egressing the WAN interface.

@@ -1,4 +1,14 @@
 #!/bin/sh
+# A 3K frozen installation has no automatic upstream source or binary updater.
+# The API uses the same marker to reject /update before starting this service.
+if [ -f /etc/omr-vps-3k-frozen.json ]; then
+    if [ -f /etc/openmptcprouter-vps-admin/update ] ||
+       [ -f /etc/openmptcprouter-vps-admin/update-bin ]; then
+        echo "OMR 3K frozen: automatic upstream update refused; use a reviewed release bundle" >&2
+        exit 1
+    fi
+    exit 0
+fi
 if [ -f /etc/openmptcprouter-vps-admin/update ]; then
         wget -O - http://www.openmptcprouter.com/server/debian.sh | sh
         rm -f /etc/openmptcprouter-vps-admin/update

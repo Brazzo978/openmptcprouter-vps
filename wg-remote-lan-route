@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Keep road-warrior WireGuard LAN routes in a dedicated policy table.
+
+Only packets arriving on client-wg0 consult this table.  The router LAN
+prefixes and router tunnel address come from omr-admin's synchronized state;
+nothing here changes the VPS main routing table or opens public WAN ports.
+"""
+
+import argparse
+import ipaddress
+import json
+import re
+import shlex
+import subprocess
+from pathlib import Path
+
+CONFIG = Path("/etc/openmptcprouter-vps-admin/omr-admin-config.json")
+WG_INTERFACE = "client-wg0"
+TABLE = "24612"
+PRIORITY = "12460"
+VPN_DEVICE = re.compile(r"^(?:mqvpn|tun|gt-tun|gt-udp-tun|dsvpn|wg)[A-Za-z0-9_.-]*$")
+
+
+def output(*args):
+    return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL)
+
+
+def apply(args, dry_run):
+    if dry_run:
+        print(shlex.join(args))
+    else:
+        subprocess.run(args, check=True)
+
+
+def configured_lan(config_path):
+    data = json.loads(config_path.read_text())
+    users = data.get("users", [{}])
+    router = users[0].get("openmptcprouter", {}) if users else {}
+    remote = ipaddress.IPv4Address(router["vpnremoteip"])
+    if not remote.is_private:
+        raise ValueError("router tunnel address must be private IPv4")
+    networks = set()
+    for raw in router.get("lanips", []):
+        net = ipaddress.IPv4Network(raw, strict=False)
+        if not net.is_private or net.prefixlen < 16:
+            raise ValueError("router LAN prefix is not a narrow private IPv4 network")
+        if net.overlaps(ipaddress.IPv4Network("10.255.246.0/24")):
+            raise ValueError("router LAN overlaps WireGuard client subnet")
+        networks.add(net)
+    return remote, sorted(networks, key=lambda n: (int(n.network_address), n.prefixlen))
+
+
+def current_routes():
+    try:
+        return {line.split()[0] for line in output("ip", "-4", "route", "show", "table", TABLE).splitlines() if line}
+    except subprocess.CalledProcessError:
+        return set()
+
+
+def rule_present():
+    try:
+        return any(line.lstrip().startswith(PRIORITY + ":") and
+                   "iif " + WG_INTERFACE in line and "lookup " + TABLE in line
+                   for line in output("ip", "-4", "rule", "show").splitlines())
+    except subprocess.CalledProcessError:
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--tunnel-dev", help="only for offline dry-run testing")
+    args = parser.parse_args()
+    if args.tunnel_dev and not args.dry_run:
+        parser.error("--tunnel-dev requires --dry-run")
+    interface_up = args.dry_run or Path("/sys/class/net/" + WG_INTERFACE).exists()
+    if not args.config.exists():
+        return 0
+    remote, networks = configured_lan(args.config)
+    if not interface_up or not networks:
+        if not args.dry_run:
+            for stale in current_routes():
+                apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
+            if rule_present():
+                apply(["ip", "-4", "rule", "del", "pref", PRIORITY, "iif", WG_INTERFACE,
+                       "lookup", TABLE], False)
+        return 0
+    if args.tunnel_dev:
+        device = args.tunnel_dev
+    else:
+        route = json.loads(output("ip", "-j", "-4", "route", "get", str(remote)))
+        device = route[0].get("dev", "") if route else ""
+    if not VPN_DEVICE.fullmatch(device) or device == WG_INTERFACE:
+        raise RuntimeError("router tunnel address is not reachable over an OMR VPN interface")
+
+    if not args.dry_run:
+        for stale in current_routes() - {str(net) for net in networks}:
+            apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
+    for net in networks:
+        apply(["ip", "-4", "route", "replace", str(net), "via", str(remote),
+               "dev", device, "onlink", "table", TABLE], args.dry_run)
+    if args.dry_run or not rule_present():
+        apply(["ip", "-4", "rule", "add", "pref", PRIORITY, "iif", WG_INTERFACE,
+               "lookup", TABLE], args.dry_run)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

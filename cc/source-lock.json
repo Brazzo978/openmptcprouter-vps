@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "purpose": "Offline OpenMPTCProuter 3K VPS kernel source and packaging inputs",
+  "source": {
+    "url": "https://github.com/Ysurac/linux.git",
+    "branch_context": "omr-v6.18",
+    "commit": "1db16030b9d4f56787cd01d52adeeaa650ea5994",
+    "baseline": "6.18.0"
+  },
+  "xanmod_patches": {
+    "url": "https://gitlab.com/xanmod/linux-patches.git",
+    "commit": "6e34b2e14adc928990d23aa57d7b751116175374",
+    "series": "6.18.y",
+    "selection": "patches/xanmod-apply.tsv",
+    "known_skipped": [
+      "net/tcp/bbr3/0001-tcp_bbr-v3-update-TCP-bbr-congestion-control-module-.patch",
+      "userns/0001-sysctl-add-sysctl-to-disallow-unprivileged-CLONE_NEW.patch",
+      "xanmod/0007-XANMOD-sched-Add-yield_type-sysctl-to-reduce-or-disa.patch"
+    ]
+  },
+  "stable": {
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/patch-6.18.41.xz",
+    "sha256_compressed": "28c327c663991f98233fb900d0ae9d92e41c5120aa4a21a2290773b672a2b2fb"
+  },
+  "omr_patches": {
+    "mptcp_bpf": "patches/omr/mptcp-bpf-scheduler.patch",
+    "bbr_v3": "patches/omr/tcp-bbr-v3.patch",
+    "source_url": "https://github.com/Ysurac/openmptcprouter.git",
+    "source_commit": "74eacd096f9f0500fc3e8b3ca1c6c40cd227ffa1",
+    "source_paths": {
+      "mptcp_bpf": "6.18/target/linux/generic/hack-6.18/999-mptcp-bpf-scheduler.patch",
+      "bbr_v3": "6.18/target/linux/generic/hack-6.18/999-tcp_bbr-v3-update-TCP-bbr-congestion-control-module-.patch"
+    }
+  },
+  "custom_3k_patch": "patches/3k-tcp-custom-cc.patch",
+  "config": {
+    "stock_extracted": "config/omr-6.18.41-x64v3.config",
+    "final": "config/3k-6.18.41-x64v3.config"
+  },
+  "reference_stock_deb": {
+    "package": "linux-image-6.18.41-20260730.x64v3-omr_6.18.41-20260730.x64v3-omr_amd64.deb",
+    "sha256": "11bd01678050145ea3f47f2d1c29ab1d66d9666090a1271b50d5e784cb260b27",
+    "build_run": "Ysurac/linux GitHub Actions 30551367231 job 90900596378",
+    "url": "https://www.openmptcprouter.com/kernel/linux-image-6.18.41-20260730.x64v3-omr_6.18.41-20260730.x64v3-omr_amd64.deb"
+  },
+  "output_release": "6.18.41-20261013.x64v3-omr-3k",
+  "vendored_sha256_file": "SHA256SUMS",
+  "notes": [
+    "The official workflow permits failed XanMod patches. This lock allows only the three observed skips listed in xanmod-apply.tsv.",
+    "The 6.18.41 stable patch used GNU patch with context offsets and fuzz 1 on blk-wbt.c.",
+    "This source lock recreates the reviewed patch stack and config; it does not claim bit-identical output to the stock July 2026 binary."
+  ]
+}
