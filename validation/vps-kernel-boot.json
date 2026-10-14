@@ -6,12 +6,17 @@
     "default_bbr_v3": true,
     "guest_completion_marker": true,
     "no_kernel_crash": true,
-    "stock_cubic_loaded": true
+    "no_var_failures": true,
+    "stock_cubic_loaded": true,
+    "var_default_50": true,
+    "var_reject_0_101_unchanged": true,
+    "var_restored_50": true,
+    "var_valid_1_25_50_80_100": true
   },
   "default_congestion": "bbr",
   "host_installation": false,
   "image_deb_sha256": "b7e6d5b3e8bd94e187c5897a26f71f06cf10625d82ea308f89612cdcb79d3369",
-  "initramfs_sha256": "b04917cc33a11142c718f81cc4e8c73a5b1bdef477800346977042b0280fc62a",
+  "initramfs_sha256": "94a1ac7eb784c013b2018a6a3b77c4638e5610af4f1da9244de40ce9ec0e01ec",
   "kernel_errors": [],
   "kernel_sha256": "cb46495c461d46912b5d6a6383beb2ede84cb581be33cb2a9f2d33d891790da6",
   "modules_fail": [],
@@ -35,7 +40,7 @@
   ],
   "network": "none",
   "pass": true,
-  "qa": "VPS kernel 6.18.41 x64v3 3K isolated QEMU TCG loopback",
+  "qa": "VPS kernel 6.18.41 x64v3 3K isolated QEMU TCG loopback and NanBBR VAR parameters",
   "tcp_fail": [],
   "tcp_ok": [
     "bbr",
@@ -56,5 +61,43 @@
     "nanbbr3_var",
     "nanqinlang",
     "reno"
-  ]
+  ],
+  "var": {
+    "default_ok": [
+      "nanbbr1_var:50",
+      "nanbbr2_var:50",
+      "nanbbr3_var:50"
+    ],
+    "failures": [],
+    "invalid_reject_ok": [
+      "nanbbr1_var:0",
+      "nanbbr1_var:101",
+      "nanbbr2_var:0",
+      "nanbbr2_var:101",
+      "nanbbr3_var:0",
+      "nanbbr3_var:101"
+    ],
+    "restored": [
+      "nanbbr1_var:50",
+      "nanbbr2_var:50",
+      "nanbbr3_var:50"
+    ],
+    "valid_set_ok": [
+      "nanbbr1_var:1",
+      "nanbbr1_var:100",
+      "nanbbr1_var:25",
+      "nanbbr1_var:50",
+      "nanbbr1_var:80",
+      "nanbbr2_var:1",
+      "nanbbr2_var:100",
+      "nanbbr2_var:25",
+      "nanbbr2_var:50",
+      "nanbbr2_var:80",
+      "nanbbr3_var:1",
+      "nanbbr3_var:100",
+      "nanbbr3_var:25",
+      "nanbbr3_var:50",
+      "nanbbr3_var:80"
+    ]
+  }
 }
