@@ -116,7 +116,7 @@ VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 
-OMR_VERSION="0.1081"
+OMR_VERSION="0.1160-3K"
 
 DIR=$( pwd )
 #"
@@ -425,7 +425,7 @@ PYFROZENPINS
     python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/omr-vps-3k-frozen.json <<'PYFROZENMARKER'
 import hashlib, json, sys
 path = sys.argv[1]
-print(json.dumps({"release": "0.64.2-3K", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
+print(json.dumps({"release": "0.1160-3K", "client_release": "0.64.2-3K-rc1", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
 PYFROZENMARKER
 elif [ "$CHINA" = "yes" ]; then
 	echo "Install git..."

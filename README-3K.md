@@ -1,6 +1,6 @@
-# OpenMPTCProuter VPS 3K frozen base
+# OpenMPTCProuter VPS 0.1160-3K
 
-This branch pairs with OpenMPTCProuter v0.64.2-3K. The VPS base is official stable 0.1081 at 44958fbac2c1c06c2759aa699b37cc537120fa13. Existing older 3K branches remain separate.
+Release 0.1160-3K pairs with OpenMPTCProuter v0.64.2-3K-rc1. The VPS base is official stable 0.1081 at 44958fbac2c1c06c2759aa699b37cc537120fa13. Existing older 3K branches remain separate.
 
 The VPS kernel is 6.18.41-20261013.x64v3-omr-3k, derived from Ysurac/linux commit 1db16030b9d4f56787cd01d52adeeaa650ea5994 and the official x64v3 configuration. The vendored stack includes the selected XanMod patches, stable 6.18.41, OMR MPTCP/BBRv3 and 15 custom TCP controls. BBRv3, named bbr, is the default. All source inputs and binary image/headers are locked under cc/.
 
@@ -29,3 +29,20 @@ The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 cust
 Installation on a real VPS, WAN behavior, VAR sysfs/API behavior on the deployed system and the complete remote WireGuard GUI path remain deployment checks. This is a frozen base for testing; production systems were not installed or rebooted.
 
 The supported frozen installer path is Debian13 amd64 with local files and SOURCES=no. OMR inputs are fixed while normal OS security updates remain separate. The installer retains legacy Bullseye runtime dependencies such as libmbedcrypto3/libpcre3. Server MLVPN/OpenVPN bonding remain for older clients; their removal is client-only.
+
+## Release bundle
+
+Download openmptcprouter-vps-0.1160-3K.tar.gz and SHA256SUMS-vps-0.1160-3K from the GitHub release. The archive includes the exact kernel/headers, local API package, all 21 locked OMR packages and helper files.
+
+On Debian 13 amd64 with an x86-64-v3 capable CPU, verify the archive, extract it, and enter the extracted directory:
+
+    sha256sum --ignore-missing -c SHA256SUMS-vps-0.1160-3K
+    tar -xzf openmptcprouter-vps-0.1160-3K.tar.gz
+    cd openmptcprouter-vps-0.1160-3K
+    ./run-vps-3k.sh prepare
+
+Preparation rebuilds only the local API package and does not install services. For an intentional VPS deployment, run the following as root:
+
+    ./run-vps-3k.sh install
+
+The installer changes networking/services and installs the bundled kernel. A reboot is required to use the new kernel. Debian APT access is still required for OS dependencies; only the OMR payloads are bundled and locked. Run the wrapper rather than downloading or piping the legacy upstream installer. This prerelease still requires real multi-WAN, complete remote WireGuard GUI and full VPS installation validation.
