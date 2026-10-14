@@ -123,6 +123,14 @@ DIR=$( pwd )
 set -e
 OMR_3K_FROZEN=${OMR_3K_FROZEN:-yes}
 if [ "$OMR_3K_FROZEN" = "yes" ]; then
+    . /etc/os-release
+    if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "13" ] ||
+       [ "$(dpkg --print-architecture)" != "amd64" ] ||
+       [ "$SOURCES" != "no" ] || [ "$LOCALFILES" != "yes" ] ||
+       [ "$CHINA" != "no" ] || [ "$KERNEL" != "6.18" ]; then
+        echo "OMR 3K frozen supports only Debian 13 amd64, kernel 6.18, local files and binary packages" >&2
+        exit 1
+    fi
     if [ ! -f "$DIR/frozen/omr-amd64.lock.json" ] ||
        [ ! -f "$DIR/frozen/assets/Packages.gz" ] ||
        ! python3 "$DIR/frozen/freeze.py" verify; then
@@ -142,7 +150,8 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
        [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261013-3k1" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
-       [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ]; then
+       [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
+       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "3c29f4afdfc6292a0a68641001f263694124f496d469ab98afe4a6c737f0edf8" ]; then
         echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
         exit 1
     fi
@@ -640,7 +649,7 @@ check_running_kernel() {
 	expected=""
 	running=""
 	running="$(uname -r)"
-	expected="$(ls -1 /boot/vmlinuz-*-omr /boot/vmlinuz-*-xanmod* /boot/vmlinuz-*-mptcp 2>/dev/null | sed -e 's@.*/vmlinuz-@@' | sort -V | tail -n 1)"
+	expected="$(ls -1 /boot/vmlinuz-*-omr-3k /boot/vmlinuz-*-omr /boot/vmlinuz-*-xanmod* /boot/vmlinuz-*-mptcp 2>/dev/null | sed -e 's@.*/vmlinuz-@@' | sort -V | tail -n 1)"
 	echo " Running kernel                    : ${running}"
 	if [ -z "$expected" ]; then
 		echo ' OpenMPTCProuter kernel installed  : none found in /boot'
@@ -1256,6 +1265,8 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	echo "If you see any error here, I really don't care: it's about a module not used for home users"
 	#pip3 install pyjwt passlib uvicorn fastapi netjsonconfig python-multipart netaddr
 	#pip3 -q install fastapi netjsonconfig python-multipart uvicorn -U
+	# The frozen 3K preflight accepts Debian 13 only; these API runtime modules
+	# are distribution-managed, never pulled from a floating pip index.
 	if [ "$ID" = "debian" ] && [ "$VERSION_ID" = "13" ]; then
 		apt-get -y install python3-jsonschema python3-fastapi python3-python-multipart python3-starlette
 	elif [ "$ID" = "debian" ] && [ "$VERSION_ID" = "12" ]; then
@@ -1890,6 +1901,7 @@ if [ "$MLVPN" = "yes" ]; then
 		rm -f /var/lib/dpkg/lock
 		rm -f /var/lib/dpkg/lock-frontend
 		if ! apt-get -y -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install omr-mlvpn=${MLVPN_BINARY_VERSION}; then
+			if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then echo "Frozen MLVPN package install failed; refusing network fallback" >&2; exit 1; fi
 			wget -O /tmp/omr-mlvpn-${MLVPN_BINARY_VERSION}.deb ${VPSURL}debian/omr-mlvpn-${MLVPN_BINARY_VERSION}.deb
 			dpkg --force-confold --force-confdef -i /tmp/omr-mlvpn-${MLVPN_BINARY_VERSION}.deb
 			rm -f /tmp/omr-mlvpn-${MLVPN_BINARY_VERSION}.deb

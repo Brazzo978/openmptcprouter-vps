@@ -19,7 +19,7 @@
     }
   ],
   "mirror_base_url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/",
-  "mirror_verification": "All 20 HTTPS payloads checked for status 200, size and SHA256 from build host on 2026-10-13",
+  "mirror_verification": "All 21 HTTPS payloads checked from build host for status 200, size and SHA256 on 2026-10-13",
   "packages": [
     {
       "architecture": "amd64",
@@ -160,6 +160,16 @@
       "size": 16884,
       "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-glorytun-tcp_0.0.35-6_amd64.deb",
       "version": "0.0.35-6"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-mlvpn/omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "package": "omr-mlvpn",
+      "sha256": "0cdebbdb405fe154a9f661b1d236784190ffbdb69823d4fcb0333cedf7cd17e2",
+      "size": 49336,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "version": "3.0.0+20211028.git.ddafba3"
     },
     {
       "architecture": "amd64",

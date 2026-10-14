@@ -34,7 +34,8 @@ SELECTED = {
     "mqvpn": "0.16.2-1", "libmqvpn0": "0.16.2-1",
     "libjson-c3": "0.12.1+ds-2",
     "omr-glorytun": "0.3.4-5", "omr-glorytun-tcp": "0.0.35-6",
-    "omr-dsvpn": "0.1.4-2", "omr-shadowsocks-libev": "3.3.5-3",
+    "omr-dsvpn": "0.1.4-2", "omr-mlvpn": "3.0.0+20211028.git.ddafba3",
+    "omr-shadowsocks-libev": "3.3.5-3",
     "omr-simple-obfs": "0.0.5-1", "shadowsocks-go": "1.14.0",
     "v2ray": "5.32.0", "xray": "26.7.11", "tracebox": "0.4.4",
 }

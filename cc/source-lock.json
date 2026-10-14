@@ -49,5 +49,8 @@
     "The official workflow permits failed XanMod patches. This lock allows only the three observed skips listed in xanmod-apply.tsv.",
     "The 6.18.41 stable patch used GNU patch with context offsets and fuzz 1 on blk-wbt.c.",
     "This source lock recreates the reviewed patch stack and config; it does not claim bit-identical output to the stock July 2026 binary."
-  ]
+  ],
+  "custom_3k_namespace_patch": "patches/3k-tcp-custom-cc-namespaces.patch",
+  "custom_3k_module_metadata_patch": "patches/3k-tcp-custom-cc-module-metadata.patch",
+  "custom_3k_bbr1_kfunc_patch": "patches/3k-tcp-bbr1-kfunc.patch"
 }

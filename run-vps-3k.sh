@@ -31,10 +31,7 @@ fi
 python3 ./frozen/freeze.py fetch
 export OMR_3K_KERNEL_IMAGE_DEB="$PWD/cc/packages/image.deb"
 export OMR_3K_KERNEL_HEADERS_DEB="$PWD/cc/packages/headers.deb"
-[ -f "$OMR_3K_KERNEL_IMAGE_DEB" ] && [ -f "$OMR_3K_KERNEL_HEADERS_DEB" ] || {
-    echo "Missing offline 3K VPS kernel pair in $PWD/cc/packages" >&2
-    exit 1
-}
+python3 ./cc/fetch-packages.py
 python3 ./cc/verify-3k-kernel.py "$OMR_3K_KERNEL_IMAGE_DEB" "$OMR_3K_KERNEL_HEADERS_DEB"
 export OMR_3K_FROZEN=yes
 exec ./debian9-x86_64.sh

@@ -44,3 +44,6 @@ e76f7a6ef5c8994be268ebae728cf978b6e0993513aa30652c43cf078076f817  patches/xanmod
 f8cf52c205e223a2ce0d5814f7bc9d7e575fc96261dd35af4a5e6389c688145b  patches/xanmod/zen/0001-ZEN-input-evdev-Use-call_rcu-when-detaching-client.patch
 d1045fd3248f6aac2d2f030ffceb82252e0a1b2e1e3dcef632137301da7004b8  patches/xanmod/zen/0002-ZEN-dm-crypt-Disable-workqueues-for-crypto-ops.patch
 629aac6572628882691654aee5af041026f927581ae4634bea63e1c53b1b4cdf  patches/xanmod-apply.tsv
+4218603b59d23d874351d90ed3c326bc5aa937cf783708f07e05a929170678a3  patches/3k-tcp-custom-cc-namespaces.patch
+44790726f93dbfda632c97625ebfbbd752c855168c91b122dfc4695badf31d07  patches/3k-tcp-custom-cc-module-metadata.patch
+f67802a61d02a37c905c6acb393b69074922b2b1c678644dfe4e56f1a75c2f0a  patches/3k-tcp-bbr1-kfunc.patch

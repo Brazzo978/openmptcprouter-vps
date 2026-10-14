@@ -62,6 +62,9 @@ rm -f net/mptcp/protocol.c.orig net/mptcp/protocol.h.orig
 patch --batch --forward -p1 < "$cc_dir/patches/omr/tcp-bbr-v3.patch"
 grep -Eq '^#define BBR_VERSION[[:space:]]+3$' net/ipv4/tcp_bbr.c
 patch --batch --forward -p1 < "$cc_dir/patches/3k-tcp-custom-cc.patch"
+patch --batch --forward -p1 < "$cc_dir/patches/3k-tcp-custom-cc-namespaces.patch"
+patch --batch --forward -p1 < "$cc_dir/patches/3k-tcp-custom-cc-module-metadata.patch"
+patch --batch --forward -p1 < "$cc_dir/patches/3k-tcp-bbr1-kfunc.patch"
 grep -Eq '^#define ICSK_CA_PRIV_SIZE[[:space:]]+\(216\)$' include/net/inet_connection_sock.h
 if find . -name '*.rej' -print -quit | grep -q .; then
     echo "Patch rejects found" >&2
@@ -92,6 +95,7 @@ fi
 # No apt install or host module loading. Debian package dependency checks can
 # require libdw-dev even when BTF compilation succeeds with the available tools.
 DPKG_FLAGS=-d make -j"${OMR_3K_BUILD_JOBS:-4}" bindeb-pkg
+python3 "$cc_dir/check-bbr-btf.py" "$src/vmlinux"
 shopt -s nullglob
 images=("$workdir"/linux-image-"$release"_*.deb)
 headers=("$workdir"/linux-headers-"$release"_*.deb)

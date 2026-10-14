@@ -1,26 +1,31 @@
 # OpenMPTCProuter VPS 3K frozen base
 
-This branch pairs with the OpenMPTCProuter v0.64.2-3K router build. The VPS base is official stable 0.1081 at 44958fbac2c1c06c2759aa699b37cc537120fa13. Existing older 3K branches remain separate.
+This branch pairs with OpenMPTCProuter v0.64.2-3K. The VPS base is official stable 0.1081 at 44958fbac2c1c06c2759aa699b37cc537120fa13. Existing older 3K branches remain separate.
 
-The server kernel starts from Ysurac/linux commit 1db16030b9d4f56787cd01d52adeeaa650ea5994 and the official 6.18.41 x64v3 configuration. The vendored stack includes the selected XanMod patches, stable 6.18.41, OMR MPTCP BPF schedulers, BBRv3 and the 15 custom 3K TCP controls. The output release is 6.18.41-20261013.x64v3-omr-3k. See cc/source-lock.json and cc/SHA256SUMS.
+The VPS kernel is 6.18.41-20261013.x64v3-omr-3k, derived from Ysurac/linux commit 1db16030b9d4f56787cd01d52adeeaa650ea5994 and the official x64v3 configuration. The vendored stack includes the selected XanMod patches, stable 6.18.41, OMR MPTCP/BBRv3 and 15 custom TCP controls. BBRv3, named bbr, is the default. All source inputs and binary image/headers are locked under cc/.
 
-OMR binary inputs have fixed URL, version, architecture, size and SHA-256 in frozen/omr-amd64.lock.json. Fetching rejects replaced or corrupted files. The frozen installer uses a local APT repository and rejects unverified OMR download fallbacks. API /update and omr-update refuse upstream updates on installations marked /etc/omr-vps-3k-frozen.json.
+The API source and deterministic Debian builder are included in admin/. The port adds verified congestion selection with rollback, NanBBR VAR 1..100, effective XRay TCP reverse forwarding, and a WireGuard remote client path through the VPS to the OMR GUI.
 
-The reviewed API source and its deterministic Debian builder are included in admin/. Features include transactional congestion-control selection and NanBBR VAR 1..100, effective XRay TCP reverse forwarding, and a WireGuard remote client path through the VPS to the OMR router GUI.
+The 21 OMR packages have fixed version, architecture, size, SHA256 and versioned HTTPS mirror URL in frozen/omr-amd64.lock.json. Original upstream URLs remain recorded. The installer uses verified local assets and refuses unverified OMR fallbacks. API /update and omr-update refuse upstream updates on marked frozen installations.
 
-## Preparation
+## Preparation and use
 
-Run ./run-vps-3k.sh prepare to build the API package without installation.
-Run ./cc/build-kernel.sh prepare to verify and prepare the exact kernel source.
-Run ./cc/build-kernel.sh build to compile the image and headers offline.
-Run python3 ./frozen/freeze.py fetch to materialize and verify frozen OMR packages.
+From this repository, run ./run-vps-3k.sh prepare to build the API package without installation. Run python3 ./frozen/freeze.py fetch to fetch and verify locked OMR packages, or python3 ./cc/fetch-packages.py to fetch and verify the reviewed kernel pair.
 
-Generated packages are excluded from Git. The install mode requires the verified 3K image and headers pair and locked OMR assets. Preparation never installs a kernel, restarts production services or changes live routing.
+The install mode fetches missing locked kernel files, verifies the pair and API before installer execution, and is intended for an explicit deployment. No installation was executed during development.
 
-## Validation and remaining checks
+For independent source review or compilation, use separate empty workdirs:
+./cc/build-kernel.sh prepare /tmp/omr-3k-source-review
+OMR_3K_BUILD_JOBS=12 ./cc/build-kernel.sh build /tmp/omr-3k-kernel-build
 
-The complete API test suite passed: 980 passed, 9 skipped. The frozen OMR assets and source-stack replay were verified. The router firmware compiled and booted in an isolated VM; advanced diagnostics and NanBBR VAR were inspected in LuCI. XRay reverse forwarding passed a real TLS loopback test.
+The binary lock accepts the published reviewed artifacts. Local rebuilt binaries can differ with compiler and build metadata and require an intentional lock update after validation. Generated .deb files are excluded from Git.
 
-Kernel package compilation, installation in an isolated VPS, real multi-WAN behavior and the complete WireGuard remote-GUI path must be recorded before treating this as a production release. This branch is a reviewable frozen source base.
+## Validation and limits
 
-The lock freezes OMR inputs, not all Debian packages. Normal OS security updates remain separate. The existing installer still uses Debian Bullseye for legacy runtime dependencies such as libmbedcrypto3/libpcre3; a Debian13-only dependency closure needs separate work.
+The complete API suite passed: 980 passed, 9 skipped. Exact source-stack replay, patch checksums, binary package contents, BBRv3/BBR1 BTF IDs and corrupt-file rejection were verified. All 21 OMR mirror assets and the final kernel pair were downloaded via HTTPS and matched their locked hashes.
+
+The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 custom modules loaded, 18/18 real TCP loopback transfers passed, no BUG/Oops/panic. See validation/vps-kernel-boot.json. XRay reverse forwarding also passed a real TLS loopback test.
+
+Installation on a real VPS, WAN behavior, VAR sysfs/API behavior on the deployed system and the complete remote WireGuard GUI path remain deployment checks. This is a frozen base for testing; production systems were not installed or rebooted.
+
+The supported frozen installer path is Debian13 amd64 with local files and SOURCES=no. OMR inputs are fixed while normal OS security updates remain separate. The installer retains legacy Bullseye runtime dependencies such as libmbedcrypto3/libpcre3. Server MLVPN/OpenVPN bonding remain for older clients; their removal is client-only.

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Validate an offline 3K VPS image/headers pair before installer mutations."""
 import argparse
+import hashlib
+import json
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -51,7 +54,45 @@ def image_contents(deb, release):
         raise ValueError(f"missing boot/config-{release} in image")
     return config, modules
 
+
+def sha256_file(filename):
+    digest = hashlib.sha256()
+    with open(filename, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_package_lock(image, headers, lock_path=None):
+    lock_path = lock_path or Path(__file__).with_name("package-lock.json")
+    if not lock_path.is_file():
+        raise ValueError(f"missing reviewed kernel package lock: {lock_path}")
+    data = json.loads(lock_path.read_text())
+    if data.get("schema") != 1 or data.get("release") != "6.18.41-20261013.x64v3-omr-3k":
+        raise ValueError("unexpected kernel package lock schema or release")
+    packages = data.get("packages")
+    if not isinstance(packages, dict) or set(packages) != {"image", "headers"}:
+        raise ValueError("kernel package lock must contain image and headers")
+    for kind, filename in (("image", image), ("headers", headers)):
+        if not isinstance(packages[kind], dict):
+            raise ValueError(f"invalid {kind} entry in kernel package lock")
+        expected = packages[kind].get("sha256")
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise ValueError(f"invalid {kind} SHA256 in kernel package lock")
+        expected_size = packages[kind].get("size")
+        if not isinstance(expected_size, int) or Path(filename).stat().st_size != expected_size:
+            raise ValueError(f"{kind} package size differs from reviewed lock")
+        if packages[kind].get("package") != f"linux-{kind}-{data['release']}":
+            raise ValueError(f"{kind} package name differs from reviewed lock")
+        if packages[kind].get("version") != control(filename, "Version"):
+            raise ValueError(f"{kind} package version differs from reviewed lock")
+        digest = sha256_file(filename)
+        if digest != expected:
+            raise ValueError(f"{kind} package SHA256 differs from reviewed lock")
+
+
 def verify(image, headers):
+    verify_package_lock(image, headers)
     image_pkg = control(image, "Package")
     headers_pkg = control(headers, "Package")
     match = re.fullmatch(
@@ -68,7 +109,8 @@ def verify(image, headers):
         raise ValueError("image and headers versions differ")
     config, modules = image_contents(image, release)
     required = ("CONFIG_MPTCP=y", "CONFIG_TCP_CONG_BBR=y",
-                "CONFIG_TCP_CONG_ADVANCED=y")
+                "CONFIG_TCP_CONG_ADVANCED=y", "CONFIG_DEFAULT_BBR=y",
+                'CONFIG_DEFAULT_TCP_CONG="bbr"')
     for setting in required:
         if setting not in config.splitlines():
             raise ValueError(f"missing {setting}")
@@ -88,6 +130,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         print(verify(args.image, args.headers))
-    except (OSError, ValueError, subprocess.CalledProcessError, tarfile.TarError) as error:
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.CalledProcessError, tarfile.TarError) as error:
         print(f"Invalid 3K VPS kernel pair: {error}", file=sys.stderr)
         sys.exit(1)
