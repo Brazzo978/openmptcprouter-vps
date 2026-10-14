@@ -24,7 +24,7 @@ The binary lock accepts the published reviewed artifacts. Local rebuilt binaries
 
 The complete API suite passed: 980 passed, 9 skipped. Exact source-stack replay, patch checksums, binary package contents, BBRv3/BBR1 BTF IDs and corrupt-file rejection were verified. All 21 OMR mirror assets and the final kernel pair were downloaded via HTTPS and matched their locked hashes.
 
-The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 custom modules loaded, 18/18 real TCP loopback transfers passed, no BUG/Oops/panic. See validation/vps-kernel-boot.json. XRay reverse forwarding also passed a real TLS loopback test.
+The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 custom modules loaded, 18/18 real TCP loopback transfers passed, no BUG/Oops/panic. All three native NanBBR VAR module parameters accepted and read back 1, 25, 50, 80 and 100, rejected 0 and 101 without changing the previous value, and restored 50. See validation/vps-kernel-boot.json. XRay reverse forwarding also passed a real TLS loopback test.
 
 Installation on a real VPS, WAN behavior, VAR sysfs/API behavior on the deployed system and the complete remote WireGuard GUI path remain deployment checks. This is a frozen base for testing; production systems were not installed or rebooted.
 
