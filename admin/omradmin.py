@@ -14,6 +14,7 @@ import configparser
 import ipaddress
 import argparse
 import subprocess
+import selectors
 import os
 import sys
 sys.path.insert(0, '/usr/share/omr-admin')
@@ -2686,6 +2687,164 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     if current_user.disabled:
         raise inactive_user_exception()
     return current_user
+
+
+# This fixed set of services is the entire journal query surface.
+_DIAGNOSTIC_UNITS = (
+    'omr.service', 'omr-admin.service', 'xray.service', 'v2ray.service',
+    'mqvpn.service', 'mqvpn-server.service', 'glorytun-tcp@*.service',
+    'glorytun-udp@*.service', 'dsvpn-server@*.service',
+    'openvpn@*.service', 'openvpn-server@*.service',
+    'wg-quick@*.service', 'shadowsocks-libev-server@*.service',
+    'shadowsocks-libev-manager@*.service', 'shadowsocks-go.service',
+    'nftables.service', 'fail2ban.service',
+)
+_DIAGNOSTIC_SOURCES = {
+    'omr.service': ('omr', 'system'),
+    'omr-admin.service': ('omr-admin', 'system'),
+    'xray.service': ('xray', 'proxy'),
+    'v2ray.service': ('v2ray', 'proxy'),
+    'mqvpn.service': ('mqvpn', 'vpn'),
+    'mqvpn-server.service': ('mqvpn', 'vpn'),
+    'shadowsocks-go.service': ('shadowsocks', 'proxy'),
+    'nftables.service': ('nftables', 'firewall'),
+    'fail2ban.service': ('fail2ban', 'security'),
+}
+_DIAGNOSTIC_SECRET_FIELD = re.compile(
+    r'''(?i)(["']?[A-Za-z0-9_-]*(?:password|passwd|pwd|token|secret|
+    private[ _-]?key|preshared[ _-]?key|auth[ _-]?key|api[ _-]?key|
+    access[ _-]?key|authorization|credentials?|psk|upsk|uuid|key)
+    ["']?\s*[:=]\s*)
+    ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)'''.replace('\n', '').replace('    ', '')
+)
+_DIAGNOSTIC_URI_CREDENTIALS = re.compile(r'(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@')
+_DIAGNOSTIC_AUTH_HEADER = re.compile(
+    r'(?im)\bAuthorization\s*[:=]\s*(?:Bearer|Basic|Digest)\s+[^\r\n]+'
+)
+_DIAGNOSTIC_CREDENTIAL_SCHEME = re.compile(
+    r'(?i)\b(?:Bearer|Basic)\s+[^\s,;}"\x27]+'
+)
+_DIAGNOSTIC_PRIVATE_BLOCK = re.compile(
+    r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----',
+    re.DOTALL,
+)
+_DIAGNOSTIC_MQVPN_LEVEL = re.compile(r'\[(DBG|INF|WRN|ERR)\]', re.IGNORECASE)
+_DIAGNOSTIC_MAX_BYTES = 1024 * 1024
+_DIAGNOSTIC_TIMEOUT = 5.0
+
+
+def _diagnostic_redact(message):
+    # Sanitize journal MESSAGE before returning it to an authenticated caller.
+    message = _DIAGNOSTIC_PRIVATE_BLOCK.sub('[REDACTED]', message)
+    message = _DIAGNOSTIC_URI_CREDENTIALS.sub(r'\1[REDACTED]@', message)
+    message = _DIAGNOSTIC_AUTH_HEADER.sub('Authorization: [REDACTED]', message)
+    message = _DIAGNOSTIC_CREDENTIAL_SCHEME.sub('[REDACTED]', message)
+    message = _DIAGNOSTIC_SECRET_FIELD.sub(r'\1[REDACTED]', message)
+    return message[:2048]
+
+
+def _diagnostic_source(unit):
+    if not isinstance(unit, str):
+        return None
+    if unit in _DIAGNOSTIC_SOURCES:
+        return _DIAGNOSTIC_SOURCES[unit]
+    if re.fullmatch(r'glorytun-(?:tcp|udp)@[A-Za-z0-9_.-]+\.service', unit):
+        return ('glorytun', 'vpn')
+    if re.fullmatch(r'wg-quick@[A-Za-z0-9_.-]+\.service', unit):
+        return ('wireguard', 'vpn')
+    if re.fullmatch(r'dsvpn-server@[A-Za-z0-9_.-]+\.service', unit):
+        return ('dsvpn', 'vpn')
+    if re.fullmatch(r'openvpn(?:-server)?@[A-Za-z0-9_.-]+\.service', unit):
+        return ('openvpn', 'vpn')
+    if re.fullmatch(r'shadowsocks-libev-(?:server|manager)@[A-Za-z0-9_.-]+\.service', unit):
+        return ('shadowsocks', 'proxy')
+    return None
+
+
+def _diagnostic_entry(record):
+    if not isinstance(record, dict):
+        return None
+    source = _diagnostic_source(record.get('_SYSTEMD_UNIT'))
+    message = record.get('MESSAGE')
+    if source is None or not isinstance(message, str):
+        return None
+    try:
+        timestamp = int(record['__REALTIME_TIMESTAMP']) / 1_000_000
+        priority = int(record.get('PRIORITY', 6))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if timestamp < 0 or priority not in range(8):
+        return None
+    severity = ('error' if priority <= 3 else 'warning' if priority == 4
+                else 'notice' if priority == 5 else 'info' if priority == 6
+                else 'debug')
+    if source[0] == 'mqvpn':
+        level = _DIAGNOSTIC_MQVPN_LEVEL.search(message)
+        if level:
+            severity = {'DBG': 'debug', 'INF': 'info', 'WRN': 'warning',
+                        'ERR': 'error'}[level.group(1).upper()]
+        # xquic reports a normal QUIC close with an ERR tag and code zero.
+        if re.search(r'(?i)\berr\s*:\s*0x0\b', message):
+            severity = 'info'
+    return {'timestamp': timestamp, 'scope': 'vps', 'source': source[0],
+            'component': source[1], 'severity': severity,
+            'message': _diagnostic_redact(message)}
+
+
+def _diagnostic_journal(limit):
+    # Bound both elapsed time and captured output, including a huge single entry.
+    command = ['journalctl', '--no-pager', '--quiet', '--output=json',
+               '--output-fields=__REALTIME_TIMESTAMP,_SYSTEMD_UNIT,PRIORITY,MESSAGE',
+               '--reverse', '--lines=' + str(limit)]
+    command.extend('--unit=' + unit for unit in _DIAGNOSTIC_UNITS)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    output = bytearray()
+    deadline = time.monotonic() + _DIAGNOSTIC_TIMEOUT
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('journal timeout')
+                if not selector.select(remaining):
+                    raise TimeoutError('journal timeout')
+                chunk = os.read(process.stdout.fileno(),
+                                min(65536, _DIAGNOSTIC_MAX_BYTES + 1 - len(output)))
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if len(output) > _DIAGNOSTIC_MAX_BYTES:
+                    raise ValueError('journal output too large')
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+            raise OSError('journalctl failed')
+        return bytes(output)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+
+
+@app.get('/diagnostic/logs', summary='Recent VPS service logs')
+def diagnostic_logs(limit: int = Query(300, ge=1, le=1000),
+                    current_user: User = Depends(get_current_user)):
+    try:
+        output = _diagnostic_journal(limit)
+    except (OSError, TimeoutError, ValueError, subprocess.SubprocessError):
+        return {'entries': [], 'error': 'VPS journal unavailable'}
+    entries = []
+    for line in output.splitlines():
+        try:
+            entry = _diagnostic_entry(json.loads(line))
+        except (ValueError, UnicodeError):
+            continue
+        if entry is not None:
+            entries.append(entry)
+    entries.sort(key=lambda entry: entry['timestamp'], reverse=True)
+    return {'entries': entries[:limit]}
+
 
 try:
     from omr_metrics import create_router as _create_metrics_router

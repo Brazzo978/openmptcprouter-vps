@@ -120,7 +120,7 @@ VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 
-OMR_VERSION="0.1161-3K"
+OMR_VERSION="0.1162-3K"
 
 DIR=$( pwd )
 #"
@@ -152,11 +152,11 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
         exit 1
     fi
     if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
-       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261015-3k2" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261015-3k3" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
-       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "d8022f5702f8567850f488d97aa0314263ce6c2a560fee0e05adf5e869e08a42" ]; then
+       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "a6ad679b8a166b5c6c52773d0b247240d308db2ff936c0360fc476cbc4130b0a" ]; then
         echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
         exit 1
     fi
@@ -451,7 +451,7 @@ PYFROZENPINS
     python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/omr-vps-3k-frozen.json <<'PYFROZENMARKER'
 import hashlib, json, sys
 path = sys.argv[1]
-print(json.dumps({"release": "0.1161-3K", "client_release": "0.64.2-3K-rc2", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
+print(json.dumps({"release": "0.1162-3K", "client_release": "0.64.2-3K-rc3", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
 PYFROZENMARKER
 elif [ "$CHINA" = "yes" ]; then
 	echo "Install git..."
