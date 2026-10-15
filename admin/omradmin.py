@@ -58,7 +58,7 @@ from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
 from fastapi.openapi.utils import get_openapi
 from fastapi.openapi.models import SecurityBase as SecurityBaseModel
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, field_validator # pylint: disable=E0611
+from pydantic import BaseModel, StrictBool, field_validator # pylint: disable=E0611
 from starlette.status import HTTP_403_FORBIDDEN
 from starlette.responses import RedirectResponse, Response, JSONResponse, StreamingResponse
 #from starlette.requests import Request
@@ -5894,6 +5894,51 @@ class WireGuardPeer(BaseModel):
 class WireGuard(BaseModel):
     peers: List[WireGuardPeer] = []
 
+WG_REMOTE_LAN_HELPER = '/usr/local/sbin/wg-remote-lan-route'
+
+class WireGuardRemoteAccess(BaseModel):
+    lan_access: StrictBool
+    model_config = {'extra': 'forbid'}
+
+def _wireguard_remote_lan_command(action):
+    """Run the installed gate with a fixed, bounded command and parse its state."""
+    if not path.isfile(WG_REMOTE_LAN_HELPER):
+        raise HTTPException(status_code=503, detail='WireGuard remote LAN control is unavailable')
+    try:
+        result = subprocess.run(
+            [WG_REMOTE_LAN_HELPER, '--lan-access', action],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        LOG.exception('WireGuard remote LAN control failed')
+        raise HTTPException(status_code=503, detail='WireGuard remote LAN control is unavailable')
+    if result.returncode != 0:
+        LOG.error('WireGuard remote LAN control exited with status %s', result.returncode)
+        raise HTTPException(status_code=502, detail='WireGuard remote LAN control failed')
+    if action == 'status':
+        state = result.stdout.strip()
+        if state not in ('allow', 'deny'):
+            LOG.error('WireGuard remote LAN control returned an invalid state')
+            raise HTTPException(status_code=502, detail='WireGuard remote LAN status is invalid')
+        return state == 'allow'
+
+@app.get('/wireguard/remote-access', summary='Get remote WireGuard LAN access')
+def get_wireguard_remote_access(current_user: User = Depends(get_current_user)):
+    return {'supported': True, 'lan_access': _wireguard_remote_lan_command('status')}
+
+@app.post('/wireguard/remote-access', summary='Set remote WireGuard LAN access')
+def set_wireguard_remote_access(*, params: WireGuardRemoteAccess,
+                                current_user: User = Depends(get_current_user)):
+    if (current_user.userid not in (0, None) or
+            (current_user.userid is None and current_user.permissions != 'admin') or
+            current_user.permissions not in ('rw', 'admin')):
+        raise HTTPException(status_code=403, detail='Only the primary writable user may change remote LAN access')
+    _wireguard_remote_lan_command('allow' if params.lan_access else 'deny')
+    state = _wireguard_remote_lan_command('status')
+    if state != params.lan_access:
+        raise HTTPException(status_code=502, detail='WireGuard remote LAN state did not change')
+    return {'supported': True, 'lan_access': state}
+
 @app.post('/wireguard', summary="Modify Wireguard configuration")
 def wireguard(*, params: WireGuard, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
@@ -5990,8 +6035,12 @@ def lan(*, lanconfig: Lanips, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         return {'result': 'permission', 'reason': 'Read only user', 'route': 'lan'}
     lanips = lanconfig.lanips
-    if not lanips:
-        return {'result': 'error', 'reason': 'Invalid parameters', 'route': 'lan'}
+    mqvpn_routes = None
+    if path.isfile('/etc/mqvpn/server.json'):
+        try:
+            mqvpn_routes = sorted({str(ipaddress.IPv4Network(raw, strict=False)) for raw in lanips})
+        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail='Invalid LAN route for MQVPN') from exc
     with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json') as f:
         previous_config = json.load(f)
     previous_lanips = previous_config.get('users', [{}])[0].get(
@@ -6039,6 +6088,14 @@ def lan(*, lanconfig: Lanips, current_user: User = Depends(get_current_user)):
         if initial_md5 != final_md5:
             subprocess.run(["systemctl", "-q", "restart", "openvpn@tun0"], check=False)
             #set_lastchange()
+    if mqvpn_routes is not None:
+        # Keep ordinary MQVPN LAN forwarding independent of the WG checkbox.
+        reply = mqvpn_api({'cmd': 'replace_client_routes',
+                           'user': current_user.username, 'routes': mqvpn_routes})
+        if reply.get('ok') is not True or reply.get('n_routes') != len(mqvpn_routes):
+            LOG.error('MQVPN LAN route registration failed for %s', current_user.username)
+            return {'result': 'warning', 'reason': 'MQVPN LAN routes saved but not active',
+                    'route': 'lan'}
     return {'result': 'done', 'reason': 'changes applied', 'route': 'lan'}
 
 class VPNips(BaseModel):

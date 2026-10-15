@@ -63,10 +63,12 @@ The generated /root/wireguard-client.conf starts with AllowedIPs = 10.255.0.0/16
 
 For IPv4 Internet through the VPS, change the client's AllowedIPs to 0.0.0.0/0 and use a public DNS server, for example 1.1.1.1. The VPS forwards and NATs this traffic to its WAN public IPv4 address. This does not enable OMR LAN access.
 
+The authenticated VPS API also exposes `GET /wireguard/remote-access` and `POST /wireguard/remote-access` with `{"lan_access": true}` or `false`. The router GUI checkbox uses these endpoints. Only the primary writable user or primary administrator can change this global setting; other authenticated users can read it. The response reflects the helper state after applying the change; failed changes return an error.
+
 Run as root on the VPS to control the persistent LAN permission:
 
     wg-remote-lan-route --lan-access status
     wg-remote-lan-route --lan-access allow
     wg-remote-lan-route --lan-access deny
 
-The state file is /etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled (mode 0600). An absent file means deny. The helper refreshes the router GUI/LAN addresses from the locally synchronized OMR configuration and uses policy table 24612 for LAN routes. For a split tunnel, add the desired OMR LAN subnet to the client's AllowedIPs as well; a full IPv4 tunnel already covers it, but the VPS gate must still be enabled. Disabling the permission leaves GUI access and public Internet available.
+The state file is /etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled (mode 0600). An absent file means deny. The helper refreshes the router GUI/LAN addresses from the locally synchronized OMR configuration and uses policy table 24612 for LAN routes. For MQVPN, `/lan` registers each configured user's LAN prefixes with the native MQVPN server, regardless of this WireGuard checkbox. The timer replays those routes after an MQVPN restart; before opening remote WireGuard LAN access it also verifies the primary user's registered prefixes and single active session. Existing OMR port forwards using public-port DNAT to the router's MQVPN address followed by router-side DNAT to a LAN host already work with the stock MQVPN server. Native LAN-prefix registration adds direct routing for packets that still have a LAN destination address when they reach the MQVPN server, including remote WireGuard client traffic. For a split tunnel, add the desired OMR LAN subnet to the client's AllowedIPs as well; a full IPv4 tunnel already covers it, but the VPS gate must still be enabled. Disabling the permission leaves GUI access and public Internet available.

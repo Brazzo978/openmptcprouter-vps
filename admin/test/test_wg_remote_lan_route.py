@@ -22,6 +22,7 @@ def load_helper(tmp_path):
     module.LOCK = tmp_path / "wg-remote-lan-access.lock"
     module.NFT_RULESET = tmp_path / "omr.nft"
     module.NFT_RULESET.write_text("test fixture")
+    module.MQVPN_CONFIG = tmp_path / "mqvpn-server.json"
     module._real_sync_nft = module.sync_nft
     module.sync_nft = lambda *args: None
     return module
@@ -206,7 +207,7 @@ def test_route_update_failure_still_fails_timer(tmp_path, monkeypatch):
     })
     argv(monkeypatch, config, "--lan-access", "allow")
     connected_client_interface(monkeypatch, helper)
-    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "mqvpn0"}]))
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "tun0"}]))
     monkeypatch.setattr(helper, "current_routes", lambda: set())
 
     def failed_update(command, dry_run):
@@ -238,7 +239,7 @@ def test_gate_persists_root_only_and_revoke_clears_stale_policy(tmp_path, monkey
     monkeypatch.setattr(helper, "sync_nft",
                         lambda remote, nets: calls.append(("nft", str(remote), [str(n) for n in nets])))
     monkeypatch.setattr(helper, "output",
-                        lambda *args: json.dumps([{"dev": "mqvpn3kqa"}]))
+                        lambda *args: json.dumps([{"dev": "tun3kqa"}]))
     monkeypatch.setattr(helper, "current_routes", lambda: {"192.168.239.0/24"})
     monkeypatch.setattr(helper, "rule_present", lambda: True)
     monkeypatch.setattr(helper, "apply",
@@ -248,8 +249,8 @@ def test_gate_persists_root_only_and_revoke_clears_stale_policy(tmp_path, monkey
     assert helper.main() == 0
     assert helper.STATE.read_text() == "allow\n"
     assert helper.STATE.stat().st_mode & 0o777 == 0o600
-    assert calls[0] == ("nft", "10.255.239.2", ["192.168.239.0/24"])
-    assert any("route" in call[1] and "replace" in call[1] for call in calls[1:])
+    assert calls[-1] == ("nft", "10.255.239.2", ["192.168.239.0/24"])
+    assert any("route" in call[1] and "replace" in call[1] for call in calls[:-1])
 
     calls.clear()
     argv(monkeypatch, config, "--lan-access", "deny")
@@ -309,8 +310,9 @@ def test_enabled_gate_waits_for_tunnel_with_lan_set_empty(tmp_path, monkeypatch)
     config = write_config(tmp_path, {
         "vpnremoteip": "10.255.239.2", "lanips": ["192.168.239.0/24"]
     })
-    argv(monkeypatch, config, "--lan-access", "allow")
+    argv(monkeypatch, config)
     connected_client_interface(monkeypatch, helper)
+    helper.set_lan_access(True)
     calls = []
     monkeypatch.setattr(helper, "sync_nft",
                         lambda remote, nets: calls.append((str(remote), list(nets))))
@@ -335,8 +337,8 @@ def test_explicit_invalid_router_address_fails_without_opening_gate(tmp_path, mo
     monkeypatch.setattr(helper, "rule_present", lambda: False)
     with pytest.raises(ValueError):
         helper.main()
-    assert calls == [(None, [])]
-    assert helper.STATE.exists()  # persisted intent; timer retries after config repair
+    assert calls and all(call == (None, []) for call in calls)
+    assert not helper.STATE.exists()  # failed validation must not claim allow
 
 def test_firewall_checks_both_client_directions_before_conntrack():
     ruleset = (HELPER.parent / "nftables" / "omr.nft").read_text()
@@ -346,3 +348,122 @@ def test_firewall_checks_both_client_directions_before_conntrack():
     assert forward.index("jump wg_remote_return") < established
     assert "ip daddr @wg_remote_nonpublic_v4 reject" in ruleset
     assert "ip saddr @wg_remote_nonpublic_v4 reject" in ruleset
+
+def test_failed_allow_revokes_state_and_keeps_lan_set_closed(tmp_path, monkeypatch):
+    helper = load_helper(tmp_path)
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.0/24"]
+    })
+    argv(monkeypatch, config, "--lan-access", "allow")
+    connected_client_interface(monkeypatch, helper)
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "tun0"}]))
+    calls = []
+    monkeypatch.setattr(helper, "sync_nft", lambda remote, nets: calls.append(list(nets)))
+    monkeypatch.setattr(helper, "current_routes", lambda: set())
+    monkeypatch.setattr(helper, "rule_present", lambda: False)
+    def failing_apply(command, dry_run):
+        raise subprocess.CalledProcessError(2, command)
+    monkeypatch.setattr(helper, "apply", failing_apply)
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.main()
+    assert calls and all(not networks for networks in calls)
+    assert not helper.STATE.exists()
+
+
+def test_timer_refresh_does_not_temporarily_close_lan_set(tmp_path, monkeypatch):
+    helper = load_helper(tmp_path)
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.0/24"]
+    })
+    helper.set_lan_access(True)
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "tun0"}]))
+    monkeypatch.setattr(helper, "current_routes", lambda: {"192.168.100.0/24"})
+    monkeypatch.setattr(helper, "rule_present", lambda: True)
+    monkeypatch.setattr(helper, "apply", lambda *args: None)
+    calls = []
+    monkeypatch.setattr(helper, "sync_nft", lambda remote, nets: calls.append(list(nets)))
+    assert helper.main() == 0
+    assert calls == [[helper.ipaddress.IPv4Network("192.168.100.0/24")]]
+    assert helper.STATE.read_text() == "allow\n"
+
+
+def test_mqvpn_gate_registers_and_verifies_routes_before_firewall(tmp_path, monkeypatch):
+    helper = load_helper(tmp_path)
+    config = write_config(tmp_path, {
+        "userid": 0, "vpnremoteip": "10.255.220.2",
+        "lanips": ["192.168.100.42/24"]
+    })
+    helper.MQVPN_CONFIG = tmp_path / "mqvpn-server.json"
+    helper.MQVPN_CONFIG.write_text('{"control_listen":"127.0.0.1:9090"}')
+    argv(monkeypatch, config, "--lan-access", "allow")
+    connected_client_interface(monkeypatch, helper)
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "mqvpn0"}]))
+    monkeypatch.setattr(helper, "current_routes", lambda: set())
+    monkeypatch.setattr(helper, "rule_present", lambda: False)
+    calls = []
+    def control(command):
+        calls.append(("control", command))
+        if command["cmd"] == "replace_client_routes":
+            return {"ok": True, "n_routes": 1}
+        return {"ok": True, "user": "openmptcprouter",
+                "routes": ["192.168.100.0/24"], "session_count": 1}
+    monkeypatch.setattr(helper, "mqvpn_control", control)
+    monkeypatch.setattr(helper, "apply", lambda command, dry: calls.append(("ip", command)))
+    monkeypatch.setattr(helper, "sync_nft", lambda remote, nets: calls.append(("nft", list(nets))))
+    assert helper.main() == 0
+    assert [call[0] for call in calls[:2]] == ["control", "control"]
+    assert calls[-1] == ("nft", [helper.ipaddress.IPv4Network("192.168.100.0/24")])
+    assert helper.STATE.read_text() == "allow\n"
+
+
+def test_mqvpn_missing_session_closes_gate_without_revoking_native_routes(tmp_path, monkeypatch):
+    helper = load_helper(tmp_path)
+    config = write_config(tmp_path, {
+        "userid": 0, "vpnremoteip": "10.255.220.2",
+        "lanips": ["192.168.100.0/24"]
+    })
+    helper.MQVPN_CONFIG = tmp_path / "mqvpn-server.json"
+    helper.MQVPN_CONFIG.write_text('{}')
+    argv(monkeypatch, config, "--lan-access", "allow")
+    connected_client_interface(monkeypatch, helper)
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "mqvpn0"}]))
+    monkeypatch.setattr(helper, "current_routes", lambda: set())
+    monkeypatch.setattr(helper, "rule_present", lambda: False)
+    control_commands = []
+    def control(command):
+        control_commands.append(command)
+        if command["cmd"] == "replace_client_routes":
+            return {"ok": True, "n_routes": 1}
+        return {"ok": True, "user": "openmptcprouter",
+                "routes": ["192.168.100.0/24"], "session_count": 0}
+    monkeypatch.setattr(helper, "mqvpn_control", control)
+    lan_sets = []
+    monkeypatch.setattr(helper, "sync_nft", lambda remote, nets: lan_sets.append(list(nets)))
+    with pytest.raises(ValueError, match="not ready"):
+        helper.main()
+    assert lan_sets and all(not nets for nets in lan_sets)
+    assert not helper.STATE.exists()
+    assert not any(cmd.get("routes") == [] for cmd in control_commands)
+
+
+def test_gate_deny_retains_native_mqvpn_routes(tmp_path, monkeypatch):
+    helper = load_helper(tmp_path)
+    config = write_config(tmp_path, {
+        "userid": 0, "vpnremoteip": "10.255.220.2",
+        "lanips": ["192.168.100.0/24"]
+    })
+    helper.MQVPN_CONFIG = tmp_path / "mqvpn-server.json"
+    helper.MQVPN_CONFIG.write_text('{}')
+    argv(monkeypatch, config, "--lan-access", "deny")
+    commands = []
+    monkeypatch.setattr(helper, "current_routes", lambda: set())
+    monkeypatch.setattr(helper, "rule_present", lambda: False)
+    monkeypatch.setattr(helper, "sync_nft", lambda remote, nets: commands.append(("nft", list(nets))))
+    monkeypatch.setattr(helper, "mqvpn_control", lambda command: commands.append(("control", command)) or
+                        {"ok": True, "n_routes": 1})
+    assert helper.main() == 0
+    assert commands[0] == ("nft", [])
+    assert commands[1][1]["routes"] == ["192.168.100.0/24"]
+    assert not helper.STATE.exists()

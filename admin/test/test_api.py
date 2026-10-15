@@ -2245,9 +2245,35 @@ class TestLan:
         assert r.json()["result"] == "permission"
 
     def test_success(self, user_client):
-        with patch("os.path.isfile", return_value=True):
-            r = user_client.post("/lan", json={"lanips": ["192.168.1.0/24"]})
+        with (patch("os.path.isfile", return_value=True),
+              patch("omr_admin.mqvpn_api", return_value={"ok": True, "n_routes": 1}) as control):
+            r = user_client.post("/lan", json={"lanips": ["192.168.1.42/24"]})
         assert r.json()["result"] == "done"
+        control.assert_called_once_with({"cmd": "replace_client_routes",
+                                         "user": "openmptcprouter",
+                                         "routes": ["192.168.1.0/24"]})
+
+    def test_mqvpn_registration_failure_is_visible(self, user_client):
+        with (patch("os.path.isfile", _isfile_for("/etc/mqvpn/server.json")),
+              patch("omr_admin.mqvpn_api", return_value={"ok": False})):
+            r = user_client.post("/lan", json={"lanips": ["192.168.1.0/24"]})
+        assert r.json()["result"] == "warning"
+        assert "not active" in r.json()["reason"]
+
+    def test_empty_lan_list_revokes_only_this_users_native_routes(self, user_client):
+        with (patch("os.path.isfile", _isfile_for("/etc/mqvpn/server.json")),
+              patch("omr_admin.mqvpn_api", return_value={"ok": True, "n_routes": 0}) as control):
+            r = user_client.post("/lan", json={"lanips": []})
+        assert r.json()["result"] == "done"
+        control.assert_called_once_with({"cmd": "replace_client_routes",
+                                         "user": "openmptcprouter", "routes": []})
+
+    def test_invalid_mqvpn_lan_is_rejected_before_write(self, user_client):
+        with (patch("os.path.isfile", _isfile_for("/etc/mqvpn/server.json")),
+              patch("omr_admin.modif_config_user") as save):
+            r = user_client.post("/lan", json={"lanips": ["bad-prefix"]})
+        assert r.status_code == 422
+        save.assert_not_called()
 
     def test_all_lan_prefixes_are_pushed_to_openvpn(self, user_client):
         config = json.loads(json.dumps(MOCK_CONFIG))

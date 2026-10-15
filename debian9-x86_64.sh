@@ -2068,6 +2068,8 @@ if [ "$WIREGUARD" = "yes" ]; then
 		cat > /root/wireguard-client.conf <<-EOF
 		[Interface]
 		Address = 10.255.246.2/24
+		# Public DNS also works when AllowedIPs is changed to 0.0.0.0/0.
+		DNS = 1.1.1.1
 		PrivateKey = $(cat /etc/wireguard/vpn-client-private.key | tr -d "\n")
 		
 		[Peer]
@@ -2075,7 +2077,7 @@ if [ "$WIREGUARD" = "yes" ]; then
 		Endpoint = ${VPS_PUBLIC_IP}:65312
 		# Default: router GUI tunnel addresses only. For full-tunnel Internet,
 		# replace this with 0.0.0.0/0 on the client. VPS LAN access remains
-		# denied until root runs wg-remote-lan-route --lan-access allow.
+		# denied until LAN access is explicitly enabled in OMR server settings.
 		AllowedIPs = 10.255.0.0/16
 		PersistentKeepalive = 25
 		EOF

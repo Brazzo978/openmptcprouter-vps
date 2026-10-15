@@ -13,6 +13,8 @@ import json
 import os
 import re
 import shlex
+import socket
+import sys
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,6 +23,7 @@ CONFIG = Path("/etc/openmptcprouter-vps-admin/omr-admin-config.json")
 STATE = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled")
 LOCK = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.lock")
 NFT_RULESET = Path("/etc/nftables/omr.nft")
+MQVPN_CONFIG = Path("/etc/mqvpn/server.json")
 WG_INTERFACE = "client-wg0"
 TABLE = "24612"
 PRIORITY = "12460"
@@ -110,6 +113,80 @@ def configured_lan(config_path):
     return remote, sorted(networks, key=lambda n: (int(n.network_address), n.prefixlen))
 
 
+def mqvpn_control(command):
+    """Talk only to the local MQVPN control socket with a bounded response."""
+    config = json.loads(MQVPN_CONFIG.read_text())
+    listen = config.get("control_listen", "127.0.0.1:9090")
+    if not isinstance(listen, str):
+        raise ValueError("invalid MQVPN control address")
+    if listen.startswith("["):
+        host, separator, port = listen[1:].partition("]:")
+    else:
+        host, separator, port = listen.rpartition(":")
+    if not separator or not port.isascii() or not port.isdigit() or not 0 < int(port) <= 65535:
+        raise ValueError("invalid MQVPN control address")
+    if host in ("0.0.0.0", "*", "localhost"):
+        host = "127.0.0.1"
+    elif host == "::":
+        host = "::1"
+    if host not in ("127.0.0.1", "::1"):
+        raise ValueError("MQVPN control must be reached through loopback")
+    with socket.create_connection((host, int(port)), timeout=1.5) as connection:
+        connection.sendall((json.dumps(command, separators=(",", ":")) + "\n").encode("utf-8"))
+        response = bytearray()
+        while b"\n" not in response:
+            part = connection.recv(4096)
+            if not part or len(response) + len(part) > 16384:
+                raise ValueError("invalid MQVPN control response")
+            response.extend(part)
+    result = json.loads(response.split(b"\n", 1)[0])
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        raise ValueError("MQVPN control rejected client routes")
+    return result
+
+
+def sync_mqvpn_routes(config_path, require_primary=False):
+    """Restore all configured users' LAN routes, regardless of the WG gate."""
+    if not MQVPN_CONFIG.exists():
+        if require_primary:
+            raise ValueError("MQVPN route control is unavailable")
+        return
+    try:
+        users = json.loads(config_path.read_text()).get("users", [{}])[0]
+        if not isinstance(users, dict):
+            raise ValueError("invalid MQVPN user configuration")
+    except (OSError, ValueError, TypeError, KeyError, IndexError) as exc:
+        if require_primary:
+            raise
+        print(f"MQVPN LAN route refresh skipped: {exc}", file=sys.stderr)
+        return
+    primary_verified = False
+    for username, user in users.items():
+        if username == "admin" or not isinstance(user, dict) or "userid" not in user:
+            continue
+        try:
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,256}", username):
+                raise ValueError("invalid MQVPN user name")
+            routes = sorted({str(ipaddress.IPv4Network(raw, strict=False))
+                             for raw in user.get("lanips", [])})
+            reply = mqvpn_control({"cmd": "replace_client_routes", "user": username,
+                                   "routes": routes})
+            if reply.get("n_routes") != len(routes):
+                raise ValueError("MQVPN route count mismatch")
+            if require_primary and username == "openmptcprouter":
+                status = mqvpn_control({"cmd": "get_client_routes", "user": username})
+                if (status.get("user") != username or
+                        status.get("routes") != routes or status.get("session_count") != 1):
+                    raise ValueError("primary MQVPN LAN route is not ready")
+                primary_verified = True
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if require_primary and username == "openmptcprouter":
+                raise
+            print(f"MQVPN LAN route refresh failed for {username}: {exc}", file=sys.stderr)
+    if require_primary and not primary_verified:
+        raise ValueError("primary MQVPN user is missing or unverified")
+
+
 def current_routes():
     # A fresh kernel has no 24612 table; querying it directly exits 2.
     routes = json.loads(output("ip", "-j", "-N", "-4", "route", "show", "table", "all"))
@@ -155,20 +232,32 @@ def reconcile(args, enabled):
         else:
             allowed_networks = networks
 
-    if not args.dry_run and NFT_RULESET.exists():
-        # Deny is applied before stale policy routes are removed. The GUI set
-        # remains available whenever a valid router tunnel IP is known.
-        sync_nft(remote, allowed_networks)
+    if args.lan_access == "allow" and not allowed_networks:
+        raise ValueError("OMR LAN or VPN tunnel is unavailable")
     if args.dry_run:
         if not allowed_networks:
             return 0
     elif not NFT_RULESET.exists():
-        # Installer enables the timer before it installs the nft base ruleset.
+        # The timer may start before nftables during installation; an explicit
+        # allow cannot claim success without the firewall gate.
+        if args.lan_access == "allow":
+            raise ValueError("VPS firewall ruleset is unavailable")
+        clear_policy_routes()
+        if args.config.exists():
+            sync_mqvpn_routes(args.config)
         return 0
     elif not allowed_networks:
+        # Revoke before removing routes, including while the VPN is down.
+        sync_nft(remote, [])
         clear_policy_routes()
+        if args.config.exists():
+            sync_mqvpn_routes(args.config)
         return 0
 
+    if not args.dry_run and device.startswith("mqvpn"):
+        # MQVPN dispatches by the inner destination. Register and verify the
+        # primary user's LAN prefixes before publishing the WG firewall grant.
+        sync_mqvpn_routes(args.config, require_primary=True)
     if not args.dry_run:
         for stale in current_routes() - {str(net) for net in networks}:
             apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
@@ -178,6 +267,12 @@ def reconcile(args, enabled):
     if args.dry_run or not rule_present():
         apply(["ip", "-4", "rule", "add", "pref", PRIORITY, "iif", WG_INTERFACE,
                "lookup", TABLE], args.dry_run)
+    if not args.dry_run:
+        # Publish the allowed LANs only after their routes are ready. One nft
+        # transaction keeps existing access intact on timer refreshes.
+        sync_nft(remote, allowed_networks)
+        if not device.startswith("mqvpn"):
+            sync_mqvpn_routes(args.config)
     return 0
 
 
@@ -203,9 +298,23 @@ def main():
     fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
-        if args.lan_access in ("allow", "deny"):
-            set_lan_access(args.lan_access == "allow")
-        return reconcile(args, lan_access_enabled())
+        enabled = (args.lan_access == "allow" or
+                   (args.lan_access != "deny" and lan_access_enabled()))
+        try:
+            result = reconcile(args, enabled)
+            if args.lan_access in ("allow", "deny"):
+                set_lan_access(enabled)
+            return result
+        except Exception:
+            # A failed allow or timer refresh must not leave an open gate or
+            # a saved allow state. Keep the router GUI separate from LAN access.
+            set_lan_access(False)
+            try:
+                if NFT_RULESET.exists():
+                    sync_nft(None, [])
+            finally:
+                clear_policy_routes()
+            raise
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
