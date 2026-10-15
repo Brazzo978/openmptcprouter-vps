@@ -312,6 +312,22 @@ class TestConfig:
         # Top-level sections always present
         assert "shadowsocks" in body or "error" not in body
 
+    @pytest.mark.parametrize(("configured", "expected"), [
+        (None, "disable"),
+        (False, "disable"),
+        (True, "enable"),
+    ])
+    def test_bulk_redirect_config_reflects_server_state(
+        self, user_client, configured, expected
+    ):
+        config = copy.deepcopy(MOCK_CONFIG)
+        if configured is not None:
+            config["bulk_redirect_v4"] = configured
+        with patch("omr_admin.read_omr_config", return_value=config):
+            response = user_client.get("/config")
+        assert response.status_code == 200
+        assert response.json()["shorewall"]["redirect_ports"] == expected
+
     def test_admin_can_query_by_userid(self, admin_client):
         r = admin_client.get("/config?userid=0")
         assert r.status_code == 200
