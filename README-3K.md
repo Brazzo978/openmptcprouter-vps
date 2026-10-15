@@ -22,7 +22,7 @@ The binary lock accepts the published reviewed artifacts. Local rebuilt binaries
 
 ## Validation and limits
 
-The complete updated API suite passed: 1001 passed, 9 skipped. Exact source-stack replay, patch checksums, binary package contents, BBRv3/BBR1 BTF IDs and corrupt-file rejection were verified. All 21 OMR mirror assets and the final kernel pair were downloaded via HTTPS and matched their locked hashes.
+The complete updated API suite passed: 1008 passed, 9 skipped. Exact source-stack replay, patch checksums, binary package contents, BBRv3/BBR1 BTF IDs and corrupt-file rejection were verified. All 21 OMR mirror assets and the final kernel pair were downloaded via HTTPS and matched their locked hashes.
 
 The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 custom modules loaded, 18/18 real TCP loopback transfers passed, no BUG/Oops/panic. All three native NanBBR VAR module parameters accepted and read back 1, 25, 50, 80 and 100, rejected 0 and 101 without changing the previous value, and restored 50. See validation/vps-kernel-boot.json. XRay reverse forwarding also passed a real TLS loopback test.
 
@@ -54,3 +54,17 @@ Frozen installation and API metadata discovery use explicit settings or local in
 The API builder works with umask022 or077 and produces the same package. A clean install skips removal of nonexistent legacy iperf packages. All additional 3K TCP modules are loaded persistently at boot.
 
 Fresh servers without a connected router keep the remote WireGuard route helper idle. TCP congestion changes queue service restarts after validation so slow tunnel stops cannot exceed the router API timeout. Glorytun TCP uses a minimum 65536-byte buffer and a five-second stop timeout.
+
+## Remote WireGuard access
+
+The generated /root/wireguard-client.conf starts with AllowedIPs = 10.255.0.0/16. Once OMR is paired, the VPS permits only the router GUI on its tunnel IPv4 address, TCP ports 80 and 443. Access to LAN devices is denied on the VPS, even if a client selects AllowedIPs = 0.0.0.0/0.
+
+For IPv4 Internet through the VPS, change the client's AllowedIPs to 0.0.0.0/0 and use a public DNS server, for example 1.1.1.1. The VPS forwards and NATs this traffic to its WAN public IPv4 address. This does not enable OMR LAN access.
+
+Run as root on the VPS to control the persistent LAN permission:
+
+    wg-remote-lan-route --lan-access status
+    wg-remote-lan-route --lan-access allow
+    wg-remote-lan-route --lan-access deny
+
+The state file is /etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled (mode 0600). An absent file means deny. The helper refreshes the router GUI/LAN addresses from the locally synchronized OMR configuration and uses policy table 24612 for LAN routes. For a split tunnel, add the desired OMR LAN subnet to the client's AllowedIPs as well; a full IPv4 tunnel already covers it, but the VPS gate must still be enabled. Disabling the permission leaves GUI access and public Internet available.

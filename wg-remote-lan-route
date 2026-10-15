@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Keep road-warrior WireGuard LAN routes in a dedicated policy table.
+"""Gate road-warrior LAN access and maintain its dedicated OMR policy routes.
 
-Only packets arriving on client-wg0 consult this table.  The router LAN
-prefixes and router tunnel address come from omr-admin's synchronized state;
-nothing here changes the VPS main routing table or opens public WAN ports.
+The persistent flag is root-owned; absent means deny. The synchronized router
+address permits only GUI HTTP(S) by default. LAN prefixes enter nftables and
+routing table 24612 only while access is enabled and the OMR VPN is reachable.
 """
 
 import argparse
+import fcntl
 import ipaddress
 import json
+import os
 import re
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 
 CONFIG = Path("/etc/openmptcprouter-vps-admin/omr-admin-config.json")
+STATE = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled")
+LOCK = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.lock")
+NFT_RULESET = Path("/etc/nftables/omr.nft")
 WG_INTERFACE = "client-wg0"
 TABLE = "24612"
 PRIORITY = "12460"
@@ -30,6 +36,53 @@ def apply(args, dry_run):
         print(shlex.join(args))
     else:
         subprocess.run(args, check=True)
+
+
+def lan_access_enabled():
+    if not STATE.exists():
+        return False
+    if STATE.read_text().strip() != "allow":
+        raise ValueError(f"invalid WireGuard LAN access state in {STATE}")
+    return True
+
+
+def set_lan_access(enabled):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    if not enabled:
+        STATE.unlink(missing_ok=True)
+        return
+    fd, name = tempfile.mkstemp(prefix=".wg-remote-lan-", dir=STATE.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as stream:
+            stream.write("allow\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, STATE)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def nft_script(remote, networks):
+    lines = [
+        "flush set inet omr wg_remote_gui_v4",
+        "flush set inet omr wg_remote_lan_v4",
+    ]
+    if remote is not None:
+        lines.append(f"add element inet omr wg_remote_gui_v4 {{ {remote} }}")
+    if networks:
+        collapsed = ipaddress.collapse_addresses(networks)
+        elements = ", ".join(str(net) for net in collapsed)
+        lines.append(f"add element inet omr wg_remote_lan_v4 {{ {elements} }}")
+    return "\n".join(lines) + "\n"
+
+
+def sync_nft(remote, networks):
+    # nft -f submits the flush/add commands as one transaction. A failure is
+    # visible to the service and cannot leave one set updated without the other.
+    subprocess.run(["nft", "-f", "-"], input=nft_script(remote, networks),
+                   text=True, check=True)
 
 
 def configured_lan(config_path):
@@ -58,8 +111,7 @@ def configured_lan(config_path):
 
 
 def current_routes():
-    # A fresh kernel has no 24612 table; querying it directly exits 2. Dump all
-    # tables as JSON and select our numeric table without hiding ip failures.
+    # A fresh kernel has no 24612 table; querying it directly exits 2.
     routes = json.loads(output("ip", "-j", "-N", "-4", "route", "show", "table", "all"))
     return {route["dst"] for route in routes if str(route.get("table")) == TABLE}
 
@@ -78,44 +130,85 @@ def clear_policy_routes():
                "lookup", TABLE], False)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=CONFIG)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--tunnel-dev", help="only for offline dry-run testing")
-    args = parser.parse_args()
-    if args.tunnel_dev and not args.dry_run:
-        parser.error("--tunnel-dev requires --dry-run")
+def reconcile(args, enabled):
     interface_up = args.dry_run or Path("/sys/class/net/" + WG_INTERFACE).exists()
-    if not args.config.exists():
-        return 0
-    remote, networks = configured_lan(args.config)
-    if not interface_up or not networks:
-        if not args.dry_run:
+    try:
+        remote, networks = configured_lan(args.config) if args.config.exists() else (None, [])
+    except (ValueError, TypeError, KeyError, AttributeError):
+        # Malformed synchronized state must not retain a previously allowed LAN.
+        if not args.dry_run and NFT_RULESET.exists():
+            sync_nft(None, [])
             clear_policy_routes()
-        return 0
-    if args.tunnel_dev:
-        device = args.tunnel_dev
-    else:
-        route = json.loads(output("ip", "-j", "-4", "route", "get", str(remote)))
-        device = route[0].get("dev", "") if route else ""
-    if not VPN_DEVICE.fullmatch(device) or device == WG_INTERFACE:
+        raise
+    allowed_networks = []
+    device = ""
+    if enabled and interface_up and remote is not None and networks:
         if args.tunnel_dev:
-            raise ValueError("--tunnel-dev must name an OMR VPN interface")
-        if not args.dry_run:
-            clear_policy_routes()
+            device = args.tunnel_dev
+        else:
+            route = json.loads(output("ip", "-j", "-4", "route", "get", str(remote)))
+            device = route[0].get("dev", "") if route else ""
+        if not VPN_DEVICE.fullmatch(device) or device == WG_INTERFACE:
+            if args.tunnel_dev:
+                raise ValueError("--tunnel-dev must name an OMR VPN interface")
+            device = ""
+        else:
+            allowed_networks = networks
+
+    if not args.dry_run and NFT_RULESET.exists():
+        # Deny is applied before stale policy routes are removed. The GUI set
+        # remains available whenever a valid router tunnel IP is known.
+        sync_nft(remote, allowed_networks)
+    if args.dry_run:
+        if not allowed_networks:
+            return 0
+    elif not NFT_RULESET.exists():
+        # Installer enables the timer before it installs the nft base ruleset.
+        return 0
+    elif not allowed_networks:
+        clear_policy_routes()
         return 0
 
     if not args.dry_run:
         for stale in current_routes() - {str(net) for net in networks}:
             apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
-    for net in networks:
+    for net in allowed_networks:
         apply(["ip", "-4", "route", "replace", str(net), "via", str(remote),
                "dev", device, "onlink", "table", TABLE], args.dry_run)
     if args.dry_run or not rule_present():
         apply(["ip", "-4", "rule", "add", "pref", PRIORITY, "iif", WG_INTERFACE,
                "lookup", TABLE], args.dry_run)
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--tunnel-dev", help="only for offline dry-run testing")
+    parser.add_argument("--lan-access", choices=("allow", "deny", "status"),
+                        help="persistent VPS gate for WireGuard client LAN access")
+    args = parser.parse_args()
+    if args.tunnel_dev and not args.dry_run:
+        parser.error("--tunnel-dev requires --dry-run")
+    if args.lan_access == "status":
+        print("allow" if lan_access_enabled() else "deny")
+        return 0
+    if args.dry_run:
+        enabled = (args.lan_access == "allow" or
+                   (args.lan_access != "deny" and lan_access_enabled()))
+        return reconcile(args, enabled)
+
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if args.lan_access in ("allow", "deny"):
+            set_lan_access(args.lan_access == "allow")
+        return reconcile(args, lan_access_enabled())
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 if __name__ == "__main__":

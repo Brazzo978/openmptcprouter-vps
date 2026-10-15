@@ -2065,24 +2065,6 @@ if [ "$WIREGUARD" = "yes" ]; then
 		EOF
 	fi
 	if [ ! -f /root/wireguard-client.conf ]; then
-		# The router is not necessarily paired yet. Use its default LAN until
-		# provisioned LAN prefixes are available in the admin configuration.
-		WG_LAN_ALLOWED=$(python3 -c '
-import ipaddress, json, sys
-try:
-    with open(sys.argv[1]) as stream:
-        users = json.load(stream).get("users", [])
-    lanips = users[0].get("openmptcprouter", {}).get("lanips", []) if users else []
-    networks = []
-    for lan in lanips:
-        network = ipaddress.ip_network(str(lan), strict=False)
-        if network.version == 4 and network.is_private and network.prefixlen >= 16:
-            networks.append(str(network))
-    print(", ".join(dict.fromkeys(networks[:16])))
-except (OSError, ValueError, TypeError, KeyError, IndexError):
-    pass
-' /etc/openmptcprouter-vps-admin/omr-admin-config.json 2>/dev/null)
-		[ -n "$WG_LAN_ALLOWED" ] || WG_LAN_ALLOWED="192.168.100.0/24"
 		cat > /root/wireguard-client.conf <<-EOF
 		[Interface]
 		Address = 10.255.246.2/24
@@ -2091,7 +2073,10 @@ except (OSError, ValueError, TypeError, KeyError, IndexError):
 		[Peer]
 		PublicKey = $(cat /etc/wireguard/vpn-server-public.key | tr -d "\n")
 		Endpoint = ${VPS_PUBLIC_IP}:65312
-		AllowedIPs = 10.255.0.0/16, ${WG_LAN_ALLOWED}
+		# Default: router GUI tunnel addresses only. For full-tunnel Internet,
+		# replace this with 0.0.0.0/0 on the client. VPS LAN access remains
+		# denied until root runs wg-remote-lan-route --lan-access allow.
+		AllowedIPs = 10.255.0.0/16
 		PersistentKeepalive = 25
 		EOF
 	fi
@@ -2817,11 +2802,11 @@ fi
 # field ("default via GW dev IF proto static src IP ..."), so walk the fields
 # instead of hardcoding $7 -- that used to emit "snat ip to static" and make
 # the whole nftables.conf fail to load. Skipped on dhcp-managed routes (the IP
-# can change) and scoped to the "ip saddr" line so the IPv6 masquerade below
-# it is left alone.
+# can change) and scoped to WAN oifname plus "ip saddr", preserving the
+# road-warrior masquerade toward the router and IPv6 NAT.
 VPS_SRC_IP="$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if ($i=="src") {print $(i+1); exit}}')"
 if [ -n "$VPS_SRC_IP" ] && [ -z "$(ip -4 route show default 2>/dev/null | grep -w dhcp)" ]; then
-	sed -i "/ip saddr/s/masquerade/snat ip to $VPS_SRC_IP/" /etc/nftables/omr.nft
+	sed -i '/oifname \$NET_IFACE/{/ip saddr/s/masquerade/snat ip to '"$VPS_SRC_IP"'/;}' /etc/nftables/omr.nft
 fi
 systemctl mask --now shorewall shorewall6 >/dev/null 2>&1 || true
 command -v ufw >/dev/null 2>&1 && ufw --force disable >/dev/null 2>&1 || true
