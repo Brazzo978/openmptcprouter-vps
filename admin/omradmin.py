@@ -3473,6 +3473,11 @@ async def config(userid: Optional[int] = Query(None), username: Optional[str] = 
         ipv4_addr = omr_config_data['ipv4']
     elif 'internet' in omr_config_data and not omr_config_data['internet']:
         ipv4_addr = _iface_global_addr(IFACE, 4)
+    elif path.isfile('/etc/omr-vps-3k-frozen.json'):
+        # Use the locally assigned address; a NAT VPS can set ipv4 explicitly.
+        ipv4_addr = _iface_global_addr(IFACE, 4)
+        if ipv4_addr:
+            set_global_param('ipv4', ipv4_addr)
     else:
         try:
             ipv4_addr = requests.get('http://ip.openmptcprouter.com', timeout=2).text.strip()
@@ -3499,6 +3504,10 @@ async def config(userid: Optional[int] = Query(None), username: Optional[str] = 
         vps_domain = omr_config_data['hostname']
     elif 'internet' in omr_config_data and not omr_config_data['internet']:
         vps_domain = ''
+    elif path.isfile('/etc/omr-vps-3k-frozen.json'):
+        vps_domain = socket.gethostname()
+        if vps_domain:
+            set_global_param('hostname', vps_domain)
     else:
         try:
             vps_domain = requests.get('http://hostname.openmptcprouter.com', timeout=2).text.strip()
@@ -3681,6 +3690,10 @@ def shadowsocks(*, params: ShadowsocksConfigparams, current_user: User = Depends
     #ipv4_addr = os.popen('wget -4 -qO- -T 2 http://ip.openmptcprouter.com').read().rstrip()
     if 'hostname' in omr_config_data:
         vps_domain = omr_config_data['hostname']
+    elif path.isfile('/etc/omr-vps-3k-frozen.json'):
+        vps_domain = socket.gethostname()
+        if vps_domain:
+            set_global_param('hostname', vps_domain)
     else:
         try:
             vps_domain = requests.get('http://hostname.openmptcprouter.com', timeout=2).text.strip()

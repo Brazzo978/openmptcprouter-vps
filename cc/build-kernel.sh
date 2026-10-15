@@ -15,7 +15,7 @@ src="$workdir/omr-linux"
 if [ ! -d "$src/.git" ]; then
     mkdir -p "$src"
     git -C "$src" init -q
-    git -C "$src" remote add origin https://github.com/Ysurac/linux.git
+    git -C "$src" remote add origin https://github.com/Brazzo978/openmptcprouter-linux.git
     git -C "$src" fetch --depth=1 origin "$source_commit"
     git -C "$src" checkout -q --detach "$source_commit"
 else

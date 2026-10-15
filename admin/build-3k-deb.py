@@ -10,8 +10,8 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = "0.18+20261013-3k1"
-SOURCE_DATE_EPOCH = int(datetime(2026, 10, 13, tzinfo=timezone.utc).timestamp())
+VERSION = "0.18+20261015-3k2"
+SOURCE_DATE_EPOCH = int(datetime(2026, 10, 15, tzinfo=timezone.utc).timestamp())
 ROOT = Path(__file__).resolve().parent
 SERVER = ROOT.parent if (ROOT.parent / "debian9-x86_64.sh").is_file() else ROOT.parent / "server"
 
@@ -56,6 +56,13 @@ Description: OpenMPTCProuter VPS API with 3K TCP XRay reverse forwarding
         shutil.copyfile(ROOT / "debian/postinst", debian / "postinst")
         (debian / "postinst").chmod(0o755)
         (debian / "conffiles").write_text("/etc/openmptcprouter-vps-admin/omr-admin-config.json\n")
+        # Package permissions must not inherit a hardened caller umask.
+        # In particular dpkg-deb rejects a DEBIAN directory created as 0700.
+        stage.chmod(0o755)
+        for directory in (item for item in stage.rglob("*") if item.is_dir()):
+            directory.chmod(0o755)
+        for metadata_file in (debian / "control", debian / "conffiles"):
+            metadata_file.chmod(0o644)
         for staged in sorted(stage.rglob("*"), key=lambda item: len(item.parts), reverse=True):
             os.utime(staged, (SOURCE_DATE_EPOCH, SOURCE_DATE_EPOCH))
         os.utime(stage, (SOURCE_DATE_EPOCH, SOURCE_DATE_EPOCH))

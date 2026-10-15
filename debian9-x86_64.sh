@@ -109,14 +109,18 @@ IPROUTE2_VERSION="29da83f89f6e1fe528c59131a01f5d43bcd0a000"
 SHADOWSOCKS_BINARY_VERSION="3.3.5-3"
 SHADOWSOCKS_GO_VERSION="1.14.0"
 DEFAULT_USER="openmptcprouter"
-VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
+VPS_DOMAIN_OVERRIDE=false
+[ -n "${VPS_DOMAIN:-}" ] && VPS_DOMAIN_OVERRIDE=true
+VPS_PUBLIC_IP_OVERRIDE=false
+[ -n "${VPS_PUBLIC_IP:-}" ] && VPS_PUBLIC_IP_OVERRIDE=true
+VPS_DOMAIN=${VPS_DOMAIN:-}
 VPSPATH="server-test"
-VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com)}
+VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-}
 VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 
-OMR_VERSION="0.1160-3K"
+OMR_VERSION="0.1161-3K"
 
 DIR=$( pwd )
 #"
@@ -127,8 +131,9 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
     if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "13" ] ||
        [ "$(dpkg --print-architecture)" != "amd64" ] ||
        [ "$SOURCES" != "no" ] || [ "$LOCALFILES" != "yes" ] ||
-       [ "$CHINA" != "no" ] || [ "$KERNEL" != "6.18" ]; then
-        echo "OMR 3K frozen supports only Debian 13 amd64, kernel 6.18, local files and binary packages" >&2
+       [ "$CHINA" != "no" ] || [ "$KERNEL" != "6.18" ] ||
+       [ "$OMR_METRICS" = "yes" ] || [ "$OMR_AI" = "yes" ]; then
+        echo "OMR 3K frozen supports only Debian 13 amd64, kernel 6.18, local files, binary packages and no upstream metrics/AI installer" >&2
         exit 1
     fi
     if [ ! -f "$DIR/frozen/omr-amd64.lock.json" ] ||
@@ -147,14 +152,35 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
         exit 1
     fi
     if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
-       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261013-3k1" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261015-3k2" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
-       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "3c29f4afdfc6292a0a68641001f263694124f496d469ab98afe4a6c737f0edf8" ]; then
+       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "6b06ec370bc9a4154bc9824dfb5480ebfda19e7db386edb00dcf281edec5bf09" ]; then
         echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
         exit 1
     fi
+fi
+# A route lookup reads the kernel routing table without sending a packet.
+# Set VPS_PUBLIC_IP explicitly when this VPS is behind NAT.
+if [ "$OMR_3K_FROZEN" = "yes" ]; then
+    if [ -z "$VPS_PUBLIC_IP" ]; then
+        VPS_PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+    fi
+    if [ -z "$VPS_PUBLIC_IP" ]; then
+        echo "3K frozen install needs VPS_PUBLIC_IP or a local IPv4 default route" >&2
+        exit 1
+    fi
+    # Remove old OMR sources before even the first apt-get check/update.
+    rm -f /etc/apt/sources.list.d/openmptcprouter.list /etc/apt/sources.list.d/openmptcprouter-test.list
+    stale_omr_sources="$(grep -ilE '^[[:space:]]*(deb([[:space:]]|\[)|URIs:).*openmptcprouter\.com' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true)"
+    if [ -n "$stale_omr_sources" ]; then
+        echo "3K frozen install refuses inherited upstream OMR APT sources: $stale_omr_sources" >&2
+        exit 1
+    fi
+else
+    VPS_DOMAIN=${VPS_DOMAIN:-$(wget -4 -qO- -T 2 http://hostname.openmptcprouter.com)}
+    VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-$(wget -4 -qO- -T 2 http://ip.openmptcprouter.com)}
 fi
 umask 0022
 export LC_ALL=C
@@ -267,7 +293,7 @@ if [ "$REINSTALL" = "no" ] && [ "$CURRENT_OMR" = "$OMR_VERSION" ]; then
 fi
 
 # Force update key
-[ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
+[ "$OMR_3K_FROZEN" != "yes" ] && [ -f /etc/apt/sources.list.d/openmptcprouter.list ] && {
 	echo "Update ${REPO} key"
 	apt-key del '2FDF 70C8 228B 7F04 42FE  59F6 608F D17B 2B24 D936' >/dev/null 2>&1 || true
 	if [ "$CHINA" = "yes" ]; then
@@ -425,7 +451,7 @@ PYFROZENPINS
     python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/omr-vps-3k-frozen.json <<'PYFROZENMARKER'
 import hashlib, json, sys
 path = sys.argv[1]
-print(json.dumps({"release": "0.1160-3K", "client_release": "0.64.2-3K-rc1", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
+print(json.dumps({"release": "0.1161-3K", "client_release": "0.64.2-3K-rc2", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
 PYFROZENMARKER
 elif [ "$CHINA" = "yes" ]; then
 	echo "Install git..."
@@ -875,6 +901,13 @@ elif [ "$KERNEL" = "6.18" ]; then
 		dpkg -i -B "$OMR_3K_KERNEL_HEADERS_DEB" || exit 1
 		dpkg -i -B "$OMR_3K_KERNEL_IMAGE_DEB" || exit 1
 		set_grub_default_kernel "6.18.41" "3k" || exit 1
+		install -Dm644 "$DIR/cc/omr-3k-cc.modules" /etc/modules-load.d/omr-3k-cc.conf
+		if [ "$(uname -r)" = "$kernel_release" ]; then
+			while IFS= read -r cc_module || [ -n "$cc_module" ]; do
+				case "$cc_module" in ''|\#*) continue ;; esac
+				modprobe "$cc_module" || exit 1
+			done < /etc/modules-load.d/omr-3k-cc.conf
+		fi
 	else
 		KERNEL_VERSION="6.18.41"
 		KERNEL_REV="20260730"
@@ -948,7 +981,13 @@ if [ "$IPERF" = "yes" ] && [ "$CHINA" != "yes" ]; then
 	#apt-get -y -o Dpkg::Options::="--force-overwrite" install omr-iperf3
 	#chmod 644 /lib/systemd/system/iperf3.service
 	echo "Install iperf3"
-	[ "$ARCH" = "amd64" ] && apt-get -y remove omr-iperf3 omr-libiperf0 >/dev/null 2>&1
+	if [ "$ARCH" = "amd64" ]; then
+		for legacy_iperf_pkg in omr-iperf3 omr-libiperf0; do
+			if [ "$(dpkg-query -W -f='${Status}' "$legacy_iperf_pkg" 2>/dev/null)" = "install ok installed" ]; then
+				apt-get -y remove "$legacy_iperf_pkg"
+			fi
+		done
+	fi
 	if [ "$SOURCES" = "yes" ]; then
 		apt-get -y remove iperf3 libiperf0
 		apt-get -y install xz-utils devscripts equivs
@@ -1359,6 +1398,19 @@ if [ "$OMR_ADMIN" = "yes" ]; then
 	sed -i "s:openmptcptouter:${DEFAULT_USER}:g" /etc/openmptcprouter-vps-admin/omr-admin-config.json
 	sed -i "s:AdminMySecretKey:$OMR_ADMIN_PASS_ADMIN:g" /etc/openmptcprouter-vps-admin/omr-admin-config.json
 	sed -i "s:MySecretKey:$OMR_ADMIN_PASS:g" /etc/openmptcprouter-vps-admin/omr-admin-config.json
+	if [ "$OMR_3K_FROZEN" = "yes" ]; then
+		# Preserve previously configured metadata; fresh installs use the explicit
+		# overrides (including a NAT public IP), then local route/hostname.
+		VPS_HOSTNAME="$VPS_DOMAIN"
+		[ -n "$VPS_HOSTNAME" ] || VPS_HOSTNAME="$(hostname)"
+		jq --arg ipv4 "$VPS_PUBLIC_IP" --arg hostname "$VPS_HOSTNAME" \
+			--argjson override_ipv4 "$VPS_PUBLIC_IP_OVERRIDE" \
+			--argjson override_hostname "$VPS_DOMAIN_OVERRIDE" \
+			'.ipv4 = (if $override_ipv4 then $ipv4 else (.ipv4 // $ipv4) end) |
+			 .hostname = (if $override_hostname then $hostname else (.hostname // $hostname) end)' \
+			/etc/openmptcprouter-vps-admin/omr-admin-config.json > /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp
+		mv /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp /etc/openmptcprouter-vps-admin/omr-admin-config.json
+	fi
 	[ "$NOINTERNET" = "yes" ] && {
 		jq '. + {internet: false}' /etc/openmptcprouter-vps-admin/omr-admin-config.json > /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp
 		mv /etc/openmptcprouter-vps-admin/omr-admin-config.json.tmp /etc/openmptcprouter-vps-admin/omr-admin-config.json

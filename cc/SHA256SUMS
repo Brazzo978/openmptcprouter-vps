@@ -47,3 +47,4 @@ d1045fd3248f6aac2d2f030ffceb82252e0a1b2e1e3dcef632137301da7004b8  patches/xanmod
 4218603b59d23d874351d90ed3c326bc5aa937cf783708f07e05a929170678a3  patches/3k-tcp-custom-cc-namespaces.patch
 44790726f93dbfda632c97625ebfbbd752c855168c91b122dfc4695badf31d07  patches/3k-tcp-custom-cc-module-metadata.patch
 f67802a61d02a37c905c6acb393b69074922b2b1c678644dfe4e56f1a75c2f0a  patches/3k-tcp-bbr1-kfunc.patch
+80eedf2a8a142dcb07569937664565e9f9937a1772e000f6b5c6854948a562e3  omr-3k-cc.modules

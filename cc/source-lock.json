@@ -2,10 +2,12 @@
   "schema": 1,
   "purpose": "Offline OpenMPTCProuter 3K VPS kernel source and packaging inputs",
   "source": {
-    "url": "https://github.com/Ysurac/linux.git",
+    "url": "https://github.com/Brazzo978/openmptcprouter-linux.git",
     "branch_context": "omr-v6.18",
     "commit": "1db16030b9d4f56787cd01d52adeeaa650ea5994",
-    "baseline": "6.18.0"
+    "baseline": "6.18.0",
+    "upstream_origin": "https://github.com/Ysurac/linux.git",
+    "frozen_tag": "3k-base-6.18-1db1603"
   },
   "xanmod_patches": {
     "url": "https://gitlab.com/xanmod/linux-patches.git",
@@ -52,5 +54,6 @@
   ],
   "custom_3k_namespace_patch": "patches/3k-tcp-custom-cc-namespaces.patch",
   "custom_3k_module_metadata_patch": "patches/3k-tcp-custom-cc-module-metadata.patch",
-  "custom_3k_bbr1_kfunc_patch": "patches/3k-tcp-bbr1-kfunc.patch"
+  "custom_3k_bbr1_kfunc_patch": "patches/3k-tcp-bbr1-kfunc.patch",
+  "runtime_modules": "omr-3k-cc.modules"
 }

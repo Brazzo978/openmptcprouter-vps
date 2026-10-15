@@ -13,7 +13,7 @@ else
     exit 1
 fi
 python3 "$admin_builder" --output "$PWD/debian"
-export OMR_ADMIN_BINARY_VERSION=0.18+20261013-3k1
+export OMR_ADMIN_BINARY_VERSION=0.18+20261015-3k2
 export OMR_ADMIN_LOCAL_DEB="$PWD/debian/omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb"
 export LOCALFILES=yes
 export SOURCES=no

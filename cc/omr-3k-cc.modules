@@ -1,0 +1,17 @@
+# Additional TCP controls for the paired 3K kernel; BBRv3 is built in.
+tcp_cubic
+tcp_bbr1
+tcp_bbr2
+tcp_nanqinlang
+tcp_nanbbr1_light
+tcp_nanbbr1_def
+tcp_nanbbr1_aggr
+tcp_nanbbr1_var
+tcp_nanbbr2_light
+tcp_nanbbr2_def
+tcp_nanbbr2_aggr
+tcp_nanbbr2_var
+tcp_nanbbr3_light
+tcp_nanbbr3_def
+tcp_nanbbr3_aggr
+tcp_nanbbr3_var
