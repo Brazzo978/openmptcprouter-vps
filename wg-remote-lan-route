@@ -36,9 +36,14 @@ def configured_lan(config_path):
     data = json.loads(config_path.read_text())
     users = data.get("users", [{}])
     router = users[0].get("openmptcprouter", {}) if users else {}
-    remote = ipaddress.IPv4Address(router["vpnremoteip"])
-    if not remote.is_private:
-        raise ValueError("router tunnel address must be private IPv4")
+    remote_value = router.get("vpnremoteip")
+    if remote_value is not None and not isinstance(remote_value, str):
+        raise ValueError("router tunnel address must be an IPv4 string")
+    remote = None
+    if remote_value and remote_value.strip():
+        remote = ipaddress.IPv4Address(remote_value)
+        if not remote.is_private:
+            raise ValueError("router tunnel address must be private IPv4")
     networks = set()
     for raw in router.get("lanips", []):
         net = ipaddress.IPv4Network(raw, strict=False)
@@ -47,23 +52,30 @@ def configured_lan(config_path):
         if net.overlaps(ipaddress.IPv4Network("10.255.246.0/24")):
             raise ValueError("router LAN overlaps WireGuard client subnet")
         networks.add(net)
+    if remote is None:
+        return None, []
     return remote, sorted(networks, key=lambda n: (int(n.network_address), n.prefixlen))
 
 
 def current_routes():
-    try:
-        return {line.split()[0] for line in output("ip", "-4", "route", "show", "table", TABLE).splitlines() if line}
-    except subprocess.CalledProcessError:
-        return set()
+    # A fresh kernel has no 24612 table; querying it directly exits 2. Dump all
+    # tables as JSON and select our numeric table without hiding ip failures.
+    routes = json.loads(output("ip", "-j", "-N", "-4", "route", "show", "table", "all"))
+    return {route["dst"] for route in routes if str(route.get("table")) == TABLE}
 
 
 def rule_present():
-    try:
-        return any(line.lstrip().startswith(PRIORITY + ":") and
-                   "iif " + WG_INTERFACE in line and "lookup " + TABLE in line
-                   for line in output("ip", "-4", "rule", "show").splitlines())
-    except subprocess.CalledProcessError:
-        return False
+    return any(line.lstrip().startswith(PRIORITY + ":") and
+               "iif " + WG_INTERFACE in line and "lookup " + TABLE in line
+               for line in output("ip", "-4", "rule", "show").splitlines())
+
+
+def clear_policy_routes():
+    for stale in current_routes():
+        apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
+    if rule_present():
+        apply(["ip", "-4", "rule", "del", "pref", PRIORITY, "iif", WG_INTERFACE,
+               "lookup", TABLE], False)
 
 
 def main():
@@ -80,11 +92,7 @@ def main():
     remote, networks = configured_lan(args.config)
     if not interface_up or not networks:
         if not args.dry_run:
-            for stale in current_routes():
-                apply(["ip", "-4", "route", "del", stale, "table", TABLE], False)
-            if rule_present():
-                apply(["ip", "-4", "rule", "del", "pref", PRIORITY, "iif", WG_INTERFACE,
-                       "lookup", TABLE], False)
+            clear_policy_routes()
         return 0
     if args.tunnel_dev:
         device = args.tunnel_dev
@@ -92,7 +100,11 @@ def main():
         route = json.loads(output("ip", "-j", "-4", "route", "get", str(remote)))
         device = route[0].get("dev", "") if route else ""
     if not VPN_DEVICE.fullmatch(device) or device == WG_INTERFACE:
-        raise RuntimeError("router tunnel address is not reachable over an OMR VPN interface")
+        if args.tunnel_dev:
+            raise ValueError("--tunnel-dev must name an OMR VPN interface")
+        if not args.dry_run:
+            clear_policy_routes()
+        return 0
 
     if not args.dry_run:
         for stale in current_routes() - {str(net) for net in networks}:

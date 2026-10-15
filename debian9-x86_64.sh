@@ -156,7 +156,7 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
-       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "6b06ec370bc9a4154bc9824dfb5480ebfda19e7db386edb00dcf281edec5bf09" ]; then
+       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "d8022f5702f8567850f488d97aa0314263ce6c2a560fee0e05adf5e869e08a42" ]; then
         echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
         exit 1
     fi
@@ -2578,6 +2578,27 @@ if [ "$GLORYTUN_TCP" = "yes" ]; then
 			rm -f /tmp/omr-glorytun-tcp-${GLORYTUN_TCP_BINARY_VERSION}.deb
 		fi
 	fi
+    if [ "${OMR_3K_FROZEN:-yes}" = "yes" ]; then
+        # The locked binary package still ships a 32 KiB buffer although
+        # this Glorytun version requires at least 64 KiB.
+        python3 - <<'PY3KGLORYBUFFER'
+from pathlib import Path
+import re
+config = Path("/etc/glorytun-tcp/tun0")
+text = config.read_text()
+text = re.sub(r"(\bbuffer-size[ \t]+)([0-9]+)",
+              lambda match: match[1] + str(max(65536, int(match[2]))), text)
+config.write_text(text)
+PY3KGLORYBUFFER
+        # A blocked listener can ignore SIGTERM. Bound service stop/restart
+        # rather than making router API requests wait for the 90s default.
+        mkdir -p /etc/systemd/system/glorytun-tcp@.service.d
+        cat > /etc/systemd/system/glorytun-tcp@.service.d/3k-stop-timeout.conf <<'PY3KGLORYSTOP'
+[Service]
+TimeoutStopSec=5s
+PY3KGLORYSTOP
+        systemctl daemon-reload
+    fi
 	[ "$(ip -6 a)" != "" ] && sed -i 's/0.0.0.0/::/g' /etc/glorytun-tcp/tun0
 fi
 

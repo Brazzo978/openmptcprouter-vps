@@ -1,0 +1,211 @@
+"""Offline behavior of the road-warrior LAN route timer helper."""
+
+import importlib.machinery
+import importlib.util
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.real_env
+HELPER = Path(__file__).resolve().parents[2] / "wg-remote-lan-route"
+
+
+def load_helper():
+    loader = importlib.machinery.SourceFileLoader("wg_remote_lan_route_test", str(HELPER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def write_config(tmp_path, router):
+    config = tmp_path / "omr-admin-config.json"
+    config.write_text(json.dumps({"users": [{"openmptcprouter": router}]}))
+    return config
+
+
+def argv(monkeypatch, config, *options):
+    monkeypatch.setattr(sys, "argv", ["wg-remote-lan-route", "--config", str(config), *options])
+
+
+def connected_client_interface(monkeypatch, helper):
+    real_path = Path
+
+    class ClientInterface:
+        def exists(self):
+            return True
+
+    def path(value):
+        if str(value) == "/sys/class/net/client-wg0":
+            return ClientInterface()
+        return real_path(value)
+
+    monkeypatch.setattr(helper, "Path", path)
+
+
+@pytest.mark.parametrize("router", [{}, {"vpnremoteip": ""}, {"vpnremoteip": "  "}])
+def test_fresh_config_waits_without_route_lookup(tmp_path, monkeypatch, capsys, router):
+    helper = load_helper()
+    config = write_config(tmp_path, router)
+    assert helper.configured_lan(config) == (None, [])
+    argv(monkeypatch, config, "--dry-run")
+    monkeypatch.setattr(helper, "output", lambda *args: pytest.fail("unexpected ip lookup"))
+
+    assert helper.main() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_mqvpn_lan_dry_run_uses_private_table_only(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.42/24"]
+    })
+    argv(monkeypatch, config, "--dry-run", "--tunnel-dev", "mqvpn0")
+    monkeypatch.setattr(helper, "output", lambda *args: pytest.fail("unexpected ip lookup"))
+
+    assert helper.main() == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "ip -4 route replace 192.168.100.0/24 via 10.255.220.2 dev mqvpn0 onlink table 24612",
+        "ip -4 rule add pref 12460 iif client-wg0 lookup 24612",
+    ]
+
+
+@pytest.mark.parametrize("router", [
+    {"vpnremoteip": "not-an-ip", "lanips": ["192.168.100.0/24"]},
+    {"vpnremoteip": "8.8.8.8", "lanips": ["192.168.100.0/24"]},
+    {"vpnremoteip": "10.255.220.2", "lanips": ["bad-network"]},
+    {"lanips": ["bad-network"]},
+])
+def test_invalid_explicit_config_still_fails(tmp_path, router):
+    helper = load_helper()
+    config = write_config(tmp_path, router)
+    with pytest.raises(ValueError):
+        helper.configured_lan(config)
+
+
+def test_missing_router_address_cleans_stale_private_policy(tmp_path, monkeypatch):
+    helper = load_helper()
+    config = write_config(tmp_path, {"lanips": ["192.168.100.0/24"]})
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+    commands = []
+    monkeypatch.setattr(helper, "current_routes", lambda: {"192.168.50.0/24"})
+    monkeypatch.setattr(helper, "rule_present", lambda: True)
+    monkeypatch.setattr(helper, "apply", lambda command, dry_run: commands.append((command, dry_run)))
+    monkeypatch.setattr(helper, "output", lambda *args: pytest.fail("unexpected route lookup"))
+
+    assert helper.main() == 0
+    assert commands == [
+        (["ip", "-4", "route", "del", "192.168.50.0/24", "table", "24612"], False),
+        (["ip", "-4", "rule", "del", "pref", "12460", "iif", "client-wg0",
+          "lookup", "24612"], False),
+    ]
+
+
+def test_main_interface_route_waits_and_cleans_stale_policy(tmp_path, monkeypatch):
+    helper = load_helper()
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.0/24"]
+    })
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+    commands = []
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "eth0"}]))
+    monkeypatch.setattr(helper, "current_routes", lambda: {"192.168.50.0/24"})
+    monkeypatch.setattr(helper, "rule_present", lambda: True)
+    monkeypatch.setattr(helper, "apply", lambda command, dry_run: commands.append((command, dry_run)))
+
+    assert helper.main() == 0
+    assert commands == [
+        (["ip", "-4", "route", "del", "192.168.50.0/24", "table", "24612"], False),
+        (["ip", "-4", "rule", "del", "pref", "12460", "iif", "client-wg0",
+          "lookup", "24612"], False),
+    ]
+
+
+def test_ip_lookup_failure_is_not_treated_as_missing_tunnel(tmp_path, monkeypatch):
+    helper = load_helper()
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.0/24"]
+    })
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+
+    def failed_lookup(*args):
+        raise subprocess.CalledProcessError(2, args)
+
+    monkeypatch.setattr(helper, "output", failed_lookup)
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.main()
+
+
+def test_absent_policy_table_is_normal_on_fresh_config(tmp_path, monkeypatch):
+    helper = load_helper()
+    config = write_config(tmp_path, {})
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+    calls = []
+
+    def ip_output(*command):
+        calls.append(command)
+        if command == ("ip", "-j", "-N", "-4", "route", "show", "table", "all"):
+            return json.dumps([{"dst": "default", "table": "254", "dev": "eth0"}])
+        if command == ("ip", "-4", "rule", "show"):
+            return "0: from all lookup local\n32766: from all lookup main\n"
+        pytest.fail(f"unexpected ip command: {command}")
+
+    monkeypatch.setattr(helper, "output", ip_output)
+    monkeypatch.setattr(helper, "apply", lambda *args: pytest.fail("unexpected route change"))
+
+    assert helper.main() == 0
+    assert calls == [
+        ("ip", "-j", "-N", "-4", "route", "show", "table", "all"),
+        ("ip", "-4", "rule", "show"),
+    ]
+
+
+def test_route_listing_selects_only_numeric_private_table(monkeypatch):
+    helper = load_helper()
+    routes = [
+        {"dst": "default", "dev": "eth0"},
+        {"dst": "192.168.1.0/24", "table": "254"},
+        {"dst": "192.168.50.0/24", "table": "24612"},
+        {"dst": "192.168.60.0/24", "table": 24612},
+    ]
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps(routes))
+
+    assert helper.current_routes() == {"192.168.50.0/24", "192.168.60.0/24"}
+
+
+def test_private_table_query_failure_is_not_hidden(monkeypatch):
+    helper = load_helper()
+
+    def failed_query(*args):
+        raise subprocess.CalledProcessError(2, args)
+
+    monkeypatch.setattr(helper, "output", failed_query)
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.current_routes()
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.rule_present()
+
+
+def test_route_update_failure_still_fails_timer(tmp_path, monkeypatch):
+    helper = load_helper()
+    config = write_config(tmp_path, {
+        "vpnremoteip": "10.255.220.2", "lanips": ["192.168.100.0/24"]
+    })
+    argv(monkeypatch, config)
+    connected_client_interface(monkeypatch, helper)
+    monkeypatch.setattr(helper, "output", lambda *args: json.dumps([{"dev": "mqvpn0"}]))
+    monkeypatch.setattr(helper, "current_routes", lambda: set())
+
+    def failed_update(command, dry_run):
+        raise subprocess.CalledProcessError(2, command)
+
+    monkeypatch.setattr(helper, "apply", failed_update)
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.main()

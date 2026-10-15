@@ -704,6 +704,54 @@ class TestMPTCP:
         r = user_client.post("/mptcp", json=self._PAYLOAD)
         assert r.json()["result"] == "done"
 
+    def test_queues_restarts_only_after_verified_apply(self, user_client, mptcp_env):
+        service_configs = {
+            "/etc/shadowsocks-libev/manager.json",
+            "/etc/v2ray/v2ray-server.json",
+            "/etc/xray/xray-server.json",
+            "/etc/glorytun-tcp/tun0",
+            "/etc/openvpn/tun0.conf",
+        }
+        expected = [
+            "systemctl --no-block -q restart shadowsocks-libev-manager@manager",
+            "systemctl --no-block -q restart v2ray",
+            "systemctl --no-block -q restart xray",
+            "systemctl --no-block -q restart glorytun-tcp@tun0",
+            "systemctl --no-block -q restart openvpn@tun0",
+        ]
+        values = {}
+        readbacks = []
+        queued = []
+
+        def run(command, *args, **kwargs):
+            if command[:2] == ["sysctl", "-n"]:
+                value = values.get(command[2], "0")
+                readbacks.append((command[2], value))
+                return MagicMock(returncode=0, stdout=value + "\n")
+            if command[:2] == ["sysctl", "-qw"]:
+                key, value = command[2].split("=", 1)
+                values[key] = value
+            return MagicMock(returncode=0, stdout="")
+
+        def queue(command):
+            # A restart must not be queued before sysctl readback and the
+            # persisted configuration both reflect the requested setting.
+            assert ("net.ipv4.tcp_congestion_control", "olia") in readbacks
+            assert "net.ipv4.tcp_congestion_control=olia" in mptcp_env["config"].read_text()
+            queued.append(command)
+            return 0
+
+        with (
+            patch("os.path.isfile", side_effect=lambda filename: filename in service_configs),
+            patch("subprocess.run", side_effect=run),
+            patch("os.system", side_effect=queue),
+        ):
+            response = user_client.post("/mptcp", json=self._PAYLOAD)
+
+        assert response.status_code == 200
+        assert response.json() == {"result": "done", "reason": "changes applied"}
+        assert queued == expected
+
     def test_optional_v1_fields_accepted(self, user_client):
         payload = {**self._PAYLOAD, "close_timeout": 120, "pm_type": 1,
                    "stale_loss_cnt": 4, "syn_retrans_before_tcp_fallback": 2}

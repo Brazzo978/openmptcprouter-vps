@@ -4642,17 +4642,18 @@ def mptcp(*, params: MPTCPparams, current_user: User = Depends(get_current_user)
             LOG.error(reason)
             return {'result': 'error', 'reason': reason, 'route': 'mptcp'}
 
+    # Apply/readback and rollback are complete; queue slow service restarts.
     if old_shadowsocks_content != new_shadowsocks_content:
         if os.path.isfile('/etc/shadowsocks-libev/manager.json'):
-            os.system("systemctl -q restart shadowsocks-libev-manager@manager")
+            os.system("systemctl --no-block -q restart shadowsocks-libev-manager@manager")
         if os.path.isfile('/etc/v2ray/v2ray-server.json'):
-            os.system("systemctl -q restart v2ray")
+            os.system("systemctl --no-block -q restart v2ray")
         if os.path.isfile('/etc/xray/xray-server.json'):
-            os.system("systemctl -q restart xray")
+            os.system("systemctl --no-block -q restart xray")
         if os.path.isfile('/etc/glorytun-tcp/tun0'):
-            os.system("systemctl -q restart glorytun-tcp@tun0")
+            os.system("systemctl --no-block -q restart glorytun-tcp@tun0")
         if os.path.isfile('/etc/openvpn/tun0.conf'):
-            os.system("systemctl -q restart openvpn@tun0")
+            os.system("systemctl --no-block -q restart openvpn@tun0")
     #set_lastchange()
     return {'result': 'done', 'reason': 'changes applied'}
 # Set bpf_dscp DSCP-to-WAN pins (server/VPS side: dscp_remote_id map).
