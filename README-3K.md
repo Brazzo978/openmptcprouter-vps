@@ -1,61 +1,20 @@
-# OpenMPTCProuter VPS 0.1162-3K
+# OpenMPTCProuter VPS 0.1163-3K
 
-Release 0.1162-3K pairs with OpenMPTCProuter v0.64.2-3K-rc3. The VPS base is official stable 0.1081 at 44958fbac2c1c06c2759aa699b37cc537120fa13. Existing older 3K branches remain separate.
+This final VPS release pairs with client v0.64.2-3K. It retains the reviewed Debian 13 amd64/x86-64-v3 frozen base and kernel 6.18.41-20261013.x64v3-omr-3k from 0.1162-3K. The OMR package set remains 21 packages; the mqvpn executable package is the native 0.16.2-3k2 candidate with LAN-prefix handling and XQUIC FEC capability reporting. The separate libmqvpn0 package stays at upstream 0.16.2-1. FEC capability reporting does not itself enable redundant traffic.
 
-The VPS kernel is 6.18.41-20261013.x64v3-omr-3k, derived from Ysurac/linux commit 1db16030b9d4f56787cd01d52adeeaa650ea5994 and the official x64v3 configuration. The vendored stack includes the selected XanMod patches, stable 6.18.41, OMR MPTCP/BBRv3 and 15 custom TCP controls. BBRv3, named bbr, is the default. All source inputs and binary image/headers are locked under cc/.
+The API package is omr-vps-admin 0.18+20261016-3k4. It retains the authenticated diagnostic logs, WireGuard remote access and LAN gate, and the existing XRay reverse forwarding path. The main MQVPN user's fixed IP defaults to 10.255.220.2 only when no explicit IP is configured and no other user owns that address. Existing MQVPN users and explicit addresses are preserved. The installer keeps the frozen source and kernel checks.
 
-The API source and deterministic Debian builder are included in admin/. The port adds verified congestion selection with rollback, NanBBR VAR 1..100, effective XRay TCP reverse forwarding, and a WireGuard remote client path through the VPS to the OMR GUI.
+## Preparation and installation
 
-The authenticated, read-only GET /diagnostic/logs?limit=N endpoint (1..1000, default 300) returns recent VPS service events for the unified router/VPS diagnostics view. It queries a fixed set of OMR, VPN, proxy, firewall and security systemd units, returns timestamps and normalized severity, and redacts common credential fields, Authorization headers and URI user information. Journal capture is limited to five seconds and 1 MiB; an unavailable or oversized journal returns an explicit error with no entries.
+On Debian 13 amd64 with an x86-64-v3 CPU, verify SHA256SUMS-vps-0.1163-3K against the downloaded release assets. Extract openmptcprouter-vps-0.1163-3K.tar.gz and enter its directory. Run ./run-vps-3k.sh prepare to rebuild the local API package without installation. An intentional installation uses ./run-vps-3k.sh install as root; it modifies networking, services and the kernel, and the kernel change requires a reboot. Debian APT access remains necessary for OS dependencies.
 
-The 21 OMR packages have fixed version, architecture, size, SHA256 and versioned HTTPS mirror URL in frozen/omr-amd64.lock.json. Original upstream URLs remain recorded. The installer uses verified local assets and refuses unverified OMR fallbacks. API /update and omr-update refuse upstream updates on marked frozen installations.
+The archive contains the locked kernel image and headers, 21 frozen OMR packages, helper files, the API package and this source. The native MQVPN DEB and its provenance are also separate release assets. The versioned frozen lock points to the release asset for future fetches. The API and frozen payloads must match the release manifest and SHA-256 checksums.
 
-## Preparation and use
+## Validation scope
 
-From this repository, run ./run-vps-3k.sh prepare to build the API package without installation. Run python3 ./frozen/freeze.py fetch to fetch and verify locked OMR packages, or python3 ./cc/fetch-packages.py to fetch and verify the reviewed kernel pair.
+The 0.1161-3K clean baseline and kernel validation remain historical evidence; 0.1162-3K received a targeted API upgrade check. The new API package, MQVPN executable and frozen lock require their own unit tests, package verification, fresh-install or controlled upgrade checks, and final router reconnect/port-forward verification. See the attached 0.1163 validation report for completed checks. Two WANs have carried traffic on the live test topology; no aggregated-throughput benchmark has been established. Long-term XRay stability requires continued observation.
 
-The install mode fetches missing locked kernel files, verifies the pair and API before installer execution, and is intended for an explicit deployment. A disposable Debian 13 VM is used for installation verification; consult the release fresh-install report for the exact result.
-
-For independent source review or compilation, use separate empty workdirs:
-./cc/build-kernel.sh prepare /tmp/omr-3k-source-review
-OMR_3K_BUILD_JOBS=12 ./cc/build-kernel.sh build /tmp/omr-3k-kernel-build
-
-The binary lock accepts the published reviewed artifacts. Local rebuilt binaries can differ with compiler and build metadata and require an intentional lock update after validation. Generated .deb files are excluded from Git.
-
-## Validation and limits
-
-The complete updated API suite passed: 1017 passed, 9 skipped. Exact source-stack replay, patch checksums, binary package contents, BBRv3/BBR1 BTF IDs and corrupt-file rejection were verified. All 21 OMR mirror assets and the final kernel pair were downloaded via HTTPS and matched their locked hashes.
-
-The exact final VPS image was booted in isolated QEMU: BBRv3 default, 15/15 custom modules loaded, 18/18 real TCP loopback transfers passed, no BUG/Oops/panic. All three native NanBBR VAR module parameters accepted and read back 1, 25, 50, 80 and 100, rejected 0 and 101 without changing the previous value, and restored 50. See validation/vps-kernel-boot.json. XRay reverse forwarding also passed a real TLS loopback test.
-
-WAN behavior and the complete remote WireGuard GUI path remain deployment checks. The clean 0.1161 baseline and its reboot were verified separately; The 0.1162 logging check uses a targeted 3k3 API package upgrade on that baseline. A full clean 0.1162 installation and reboot have not been repeated. The kernel 18 congestion-control, BPF and WireGuard gates retain their prior validation status.
-
-The supported frozen installer path is Debian13 amd64 with local files and SOURCES=no. OMR inputs are fixed while normal OS security updates remain separate. The installer retains legacy Bullseye runtime dependencies such as libmbedcrypto3/libpcre3. Server MLVPN/OpenVPN bonding remain for older clients; their removal is client-only.
-
-## Release bundle
-
-Download openmptcprouter-vps-0.1162-3K.tar.gz and SHA256SUMS-vps-0.1162-3K from the GitHub release. The archive includes the exact kernel/headers, local API package, all 21 locked OMR packages and helper files.
-
-On Debian 13 amd64 with an x86-64-v3 capable CPU, verify the archive, extract it, and enter the extracted directory:
-
-    sha256sum --ignore-missing -c SHA256SUMS-vps-0.1162-3K
-    tar -xzf openmptcprouter-vps-0.1162-3K.tar.gz
-    cd openmptcprouter-vps-0.1162-3K
-    ./run-vps-3k.sh prepare
-
-Preparation rebuilds only the local API package and does not install services. For an intentional VPS deployment, run the following as root:
-
-    ./run-vps-3k.sh install
-
-The installer changes networking/services and installs the bundled kernel. A reboot is required to use the new kernel. Debian APT access is still required for OS dependencies; only the OMR payloads are bundled and locked. Run the wrapper rather than downloading or piping the legacy upstream installer. This prerelease still requires real multi-WAN and complete remote WireGuard GUI validation. Consult the attached report for full VPS installation results.
-
-## Independence corrections in 0.1161
-
-Frozen installation and API metadata discovery use explicit settings or local interface/hostname data. No Ysurac metadata endpoint, APT key refresh or automatic upstream OMR update is used in the supported frozen path. The kernel source is preserved at the identical commit in Brazzo978/openmptcprouter-linux with tag3k-base-6.18-1db1603. Original upstream references remain as provenance. Debian OS/security dependencies still come from Debian repositories.
-
-The API builder works with umask022 or077 and produces the same package. A clean install skips removal of nonexistent legacy iperf packages. All additional 3K TCP modules are loaded persistently at boot.
-
-Fresh servers without a connected router keep the remote WireGuard route helper idle. TCP congestion changes queue service restarts after validation so slow tunnel stops cannot exceed the router API timeout. Glorytun TCP uses a minimum 65536-byte buffer and a five-second stop timeout.
+The WireGuard LAN gate is independent of native MQVPN LAN route registration. Disabling the remote WireGuard LAN permission still permits the router GUI and public Internet paths according to their existing rules. The full-tunnel helper and policy table 24612 are retained.
 
 ## Remote WireGuard access
 

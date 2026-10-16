@@ -10,8 +10,8 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = "0.18+20261015-3k3"
-SOURCE_DATE_EPOCH = int(datetime(2026, 10, 15, tzinfo=timezone.utc).timestamp())
+VERSION = "0.18+20261016-3k4"
+SOURCE_DATE_EPOCH = int(datetime(2026, 10, 16, tzinfo=timezone.utc).timestamp())
 ROOT = Path(__file__).resolve().parent
 SERVER = ROOT.parent if (ROOT.parent / "debian9-x86_64.sh").is_file() else ROOT.parent / "server"
 

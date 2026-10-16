@@ -123,13 +123,13 @@
     },
     {
       "architecture": "amd64",
-      "file": "mqvpn_0.16.2-1_amd64.deb",
+      "file": "mqvpn_0.16.2-3k2_amd64.deb",
       "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mqvpn/mqvpn_0.16.2-1_amd64.deb",
       "package": "mqvpn",
-      "sha256": "d7627312d75e47d0930a7a74ace4ab72d10e44d77a50fce725f877761fc1db81",
-      "size": 1379400,
-      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mqvpn_0.16.2-1_amd64.deb",
-      "version": "0.16.2-1"
+      "sha256": "6195f80b4ef2406c4df94ce7fb72ab4ae7b11206f0f6af631086d30f9a20f017",
+      "size": 1478424,
+      "url": "https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1163-3K/mqvpn_0.16.2-3k2_amd64.deb",
+      "version": "0.16.2-3k2"
     },
     {
       "architecture": "amd64",

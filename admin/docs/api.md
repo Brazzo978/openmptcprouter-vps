@@ -171,14 +171,6 @@ Shorewall itself is no longer used.
 | POST | `/wan` | `Wanips` | Router WAN IPs (written to the Shadowsocks ACL white list) |
 | POST | `/lan` | `Lanips` | Current user's LAN subnets; updates OpenVPN iroutes when client2client is enabled and registers that user's prefixes for direct LAN-destination routing in the native MQVPN server when installed. An empty list revokes those prefixes. MQVPN control failure returns `result: warning` because direct LAN-destination routing is not yet active; the timer retries. Existing public-port forwarding through router-side DNAT does not depend on this registration. Prefix registration is independent of the WireGuard remote-access gate. |
 
-### Backup
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/backuppost` | Upload the router backup (`data`: tar.gz encoded in base64); keeps the 10 most recent timestamped copies |
-| GET | `/backupget[?filename=...]` | Download the latest (or a specific) backup for the current user, base64-encoded |
-| GET | `/backuplist` | List available backups with modification times |
-
 ### User management (admin only)
 
 | Method | Path | Body model | Description |

@@ -2351,64 +2351,21 @@ class TestUpdate:
 
 
 # ===========================================================================
-# Backup
+# Removed router-to-VPS backup endpoints
 # ===========================================================================
 
 
-class TestBackupPost:
-    import base64 as _b64
-    _PAYLOAD = {"data": __import__("base64").b64encode(b"fake-tar-gz-data").decode()}
-
-    def test_requires_auth(self, unauth_client):
-        r = unauth_client.post("/backuppost", json=self._PAYLOAD)
-        assert r.status_code == 403
-
-    def test_ro_user_denied(self, ro_client):
-        r = ro_client.post("/backuppost", json=self._PAYLOAD)
-        assert r.json()["result"] == "permission"
-
-    def test_empty_data_returns_error(self, user_client):
-        r = user_client.post("/backuppost", json={"data": ""})
-        assert r.json()["result"] == "error"
-
-    def test_success(self, user_client):
-        r = user_client.post("/backuppost", json=self._PAYLOAD)
-        assert r.json()["result"] == "done"
-
-
-class TestBackupGet:
-    def test_requires_auth(self, unauth_client):
-        r = unauth_client.get("/backupget")
-        assert r.status_code == 403
-
-    def test_returns_data_key(self, user_client):
-        with patch("os.path.isfile", return_value=True):
-            r = user_client.get("/backupget")
-        assert "data" in r.json()
-
-
-class TestBackupList:
-    def test_requires_auth(self, unauth_client):
-        r = unauth_client.get("/backuplist")
-        assert r.status_code == 403
-
-    def test_no_backups_returns_false(self, user_client):
-        with patch("glob.glob", return_value=[]), patch("os.path.isfile", return_value=False):
-            r = user_client.get("/backuplist")
-        assert r.json()["backup"] is False
-
-    def test_with_backups_returns_true(self, user_client):
-        fake_file = "/var/opt/openmptcprouter/openmptcprouter-backup.tar.gz"
-        with (
-            patch("glob.glob", return_value=[fake_file]),
-            patch("os.path.isfile", return_value=True),
-            patch("os.path.getmtime", return_value=1700000000.0),
-            patch("os.stat") as mock_stat,
-        ):
-            mock_stat.return_value.st_mtime = 1700000000.0
-            r = user_client.get("/backuplist")
-        assert r.json()["backup"] is True
-        assert "modif" in r.json()
+@pytest.mark.parametrize("method,endpoint", [
+    ("post", "/backuppost"),
+    ("get", "/backupget"),
+    ("get", "/backupget?filename=example-backup.tar.gz"),
+    ("get", "/backuplist"),
+])
+def test_router_backup_endpoint_removed(user_client, method, endpoint):
+    request = getattr(user_client, method)
+    response = request(endpoint, json={"data": "unused"}) if method == "post" else request(endpoint)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not Found"
 
 
 # ===========================================================================

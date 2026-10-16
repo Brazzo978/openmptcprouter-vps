@@ -120,13 +120,14 @@ VPSURL="https://www.openmptcprouter.com/"
 REPO="repo.openmptcprouter.com"
 CHINA=${CHINA:-no}
 
-OMR_VERSION="0.1162-3K"
+OMR_VERSION="0.1163-3K"
 
 DIR=$( pwd )
 #"
 set -e
 OMR_3K_FROZEN=${OMR_3K_FROZEN:-yes}
 if [ "$OMR_3K_FROZEN" = "yes" ]; then
+    MQVPN_VERSION="0.16.2-3k2"
     . /etc/os-release
     if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "13" ] ||
        [ "$(dpkg --print-architecture)" != "amd64" ] ||
@@ -152,11 +153,11 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
         exit 1
     fi
     if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
-       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261015-3k3" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261016-3k4" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
-       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "a6ad679b8a166b5c6c52773d0b247240d308db2ff936c0360fc476cbc4130b0a" ]; then
+       [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "$OMR_ADMIN_EXPECTED_SHA256" ]; then
         echo "OMR 3K frozen install requires the reviewed local VPS API deb" >&2
         exit 1
     fi
@@ -451,7 +452,7 @@ PYFROZENPINS
     python3 - "$FROZEN_INSTALL/omr-amd64.lock.json" > /etc/omr-vps-3k-frozen.json <<'PYFROZENMARKER'
 import hashlib, json, sys
 path = sys.argv[1]
-print(json.dumps({"release": "0.1162-3K", "client_release": "0.64.2-3K-rc3", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
+print(json.dumps({"release": "0.1163-3K", "client_release": "0.64.2-3K", "lock_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}, sort_keys=True))
 PYFROZENMARKER
 elif [ "$CHINA" = "yes" ]; then
 	echo "Install git..."
@@ -2149,8 +2150,11 @@ if [ "$MQVPN" = "yes" ]; then
 	fi
 	sed -i "s:PSK:$MQVPN_KEY:g" /etc/mqvpn/server.json
 	if [ -n "$MQVPN_USERS" ] && [ "$MQVPN_USERS" != "null" ] && [ "$MQVPN_USERS" != "[]" ]; then
-		jq --argjson users "$MQVPN_USERS" '.users = ($users + [.users[] | select(.name as $n | ($users | map(.name) | index($n)) == null)])' /etc/mqvpn/server.json > /etc/mqvpn/server.json.tmp && mv /etc/mqvpn/server.json.tmp /etc/mqvpn/server.json
+		jq --argjson users "$MQVPN_USERS" '.users = ($users + [.users[] | select(.name as $n | ($users | map(.name) | index($n)) == null) | if .name == "openmptcprouter" and .fixed_ip == "10.255.220.2" and any($users[]; .name != "openmptcprouter" and .fixed_ip == "10.255.220.2") then del(.fixed_ip) else . end])' /etc/mqvpn/server.json > /etc/mqvpn/server.json.tmp && mv /etc/mqvpn/server.json.tmp /etc/mqvpn/server.json
 	fi
+	# 3K uses one primary router with a stable point-to-point address.
+	# Preserve explicit user assignments and never steal another user's IP.
+	jq 'if any(.users[]; .name != "openmptcprouter" and .fixed_ip == "10.255.220.2") then . else .users |= map(if .name == "openmptcprouter" and ((.fixed_ip // "") == "") then . + {"fixed_ip":"10.255.220.2"} else . end) end' /etc/mqvpn/server.json > /etc/mqvpn/server.json.tmp && mv /etc/mqvpn/server.json.tmp /etc/mqvpn/server.json
 	if [ ! -f /etc/mqvpn/server.key ]; then
 		openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 -keyout /etc/mqvpn/server.key -out /etc/mqvpn/server.crt -subj "/C=US/ST=Oregon/L=Portland/O=OpenMPTCProuterVPS/OU=Org/CN=www.openmptcprouter.vps"
 	fi
