@@ -18,13 +18,6 @@ Installation changes networking, services and the kernel. Debian dependencies re
 - Remote WireGuard access to the OMR GUI. LAN access is denied by default and can be enabled using the client checkbox or the VPS helper/API. An IPv4 full tunnel with `AllowedIPs = 0.0.0.0/0` can use the VPS public IP without enabling LAN access.
 - Router backups to the VPS and their API endpoints have been removed; automatic OMR updates are blocked to preserve the frozen build.
 
-## Validation
-
-Installation from a clean Debian 13 snapshot completed with exit code 0, followed by a reboot into the frozen kernel and verification of all 21 packages. **67 live checks passed**: 31 installation/API/service checks, 8 checks using the actual MQVPN engine with a handshake and traffic to a test LAN, and 28 WireGuard checks covering external HTTPS/DNS, GUI access, LAN blocking, explicit access and revocation of established connections. The report adds archive identity verification, for **68 checks in total**. API suite: **1042 tests passed, 9 skipped**.
-
-SHA-256 of the exact bundle installed and published: `5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7`.
-
-The WireGuard checks use simulated OMR GUI/LAN endpoints; native MQVPN routing was tested separately with actual packets. The previous physical fiber + 5G test client was deleted by the user and was not paired again after the clean installation. Earlier physical-client and TCP forwarding checks are documented in the client release. No controlled aggregated-throughput benchmark or long-term XRay stability proof is claimed.
 
 ## Source and installation
 
