@@ -4,6 +4,16 @@ This final VPS release pairs with client v0.64.2-3K. It retains the reviewed Deb
 
 The API package is omr-vps-admin 0.18+20261016-3k4. It retains the authenticated diagnostic logs, WireGuard remote access and LAN gate, and the existing XRay reverse forwarding path. The main MQVPN user's fixed IP defaults to 10.255.220.2 only when no explicit IP is configured and no other user owns that address. Existing MQVPN users and explicit addresses are preserved. The installer keeps the frozen source and kernel checks.
 
+## One-line installation
+
+Run as root on Debian 13 amd64 with an x86-64-v3 CPU:
+
+```sh
+workdir=$(mktemp -d) && wget -O "$workdir/vps.tar.gz" https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1163-3K/openmptcprouter-vps-0.1163-3K.tar.gz && echo "5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7  $workdir/vps.tar.gz" | sha256sum -c - && tar -xzf "$workdir/vps.tar.gz" -C "$workdir" && cd "$workdir/openmptcprouter-vps-0.1163-3K" && ./run-vps-3k.sh install
+```
+
+Reboot after installation to use the included kernel. SSH uses port 65222. The command verifies the exact clean-tested archive before extraction.
+
 ## Preparation and installation
 
 On Debian 13 amd64 with an x86-64-v3 CPU, verify SHA256SUMS-vps-0.1163-3K against the downloaded release assets. Extract openmptcprouter-vps-0.1163-3K.tar.gz and enter its directory. Run ./run-vps-3k.sh prepare to rebuild the local API package without installation. An intentional installation uses ./run-vps-3k.sh install as root; it modifies networking, services and the kernel, and the kernel change requires a reboot. Debian APT access remains necessary for OS dependencies.
@@ -12,7 +22,7 @@ The archive contains the locked kernel image and headers, 21 frozen OMR packages
 
 ## Validation scope
 
-The 0.1161-3K clean baseline and kernel validation remain historical evidence; 0.1162-3K received a targeted API upgrade check. The new API package, MQVPN executable and frozen lock require their own unit tests, package verification, fresh-install or controlled upgrade checks, and final router reconnect/port-forward verification. See the attached 0.1163 validation report for completed checks. Two WANs have carried traffic on the live test topology; no aggregated-throughput benchmark has been established. Long-term XRay stability requires continued observation.
+The exact release archive passed a fresh Debian 13 installation, reboot into the frozen kernel and 67 live checks: 31 installation/API/service checks, 8 native MQVPN handshake/LAN roundtrip checks and 28 WireGuard IPv4 full-tunnel, DNS, GUI, LAN-gate and revocation checks. The report adds archive identity verification, for 68 checks in total. The API suite passed 1042 tests with 9 skipped. WireGuard uses simulated OMR GUI/LAN endpoints; native MQVPN was tested separately with actual packets. The previous physical test router was deleted by the user and was not reattached after clean installation. No controlled aggregated-throughput benchmark or long-term XRay stability proof is claimed.
 
 The WireGuard LAN gate is independent of native MQVPN LAN route registration. Disabling the remote WireGuard LAN permission still permits the router GUI and public Internet paths according to their existing rules. The full-tunnel helper and policy table 24612 are retained.
 
