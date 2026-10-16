@@ -1,0 +1,214 @@
+# OpenMPTCProuter Server API
+
+`omradmin.py` is the REST API used by OpenMPTCProuter routers to configure and query
+their VPS. It is built on [FastAPI](https://fastapi.tiangolo.com/) and served over
+HTTPS by uvicorn (MPTCP-aware listening socket in single-worker mode).
+
+- Default listen address: `0.0.0.0` (or `::` when IPv6 is available)
+- Default port: `65500`
+- TLS certificate/key: `/etc/openmptcprouter-vps-admin/cert.pem` / `key.pem`
+- Main configuration file: `/etc/openmptcprouter-vps-admin/omr-admin-config.json`
+
+## Running
+
+```
+python3 omradmin.py [--host HOST] [--port PORT] [--workers N]
+```
+
+Defaults come from `omr-admin-config.json` (`port`, `host`, `workers` keys). With
+`--workers 1` the server uses an MPTCP listening socket; with more workers it falls
+back to standard TCP sockets (uvicorn multi-process mode).
+
+On startup ("lifespan") the server:
+
+1. Registers MPTCP BPF schedulers from `/usr/share/bpf/scheduler` (if present) and
+   re-applies the configured `net.mptcp.scheduler` sysctl.
+2. Synchronizes Shadowsocks-Go users from the config.
+3. Starts the optional `omr_metrics` auto-learning loop (no-op unless enabled, see
+   [omr-decision-engine.md](omr-decision-engine.md)).
+
+Additionally, importing `omradmin` — which happens once per uvicorn worker,
+before the `lifespan` startup step above runs — replays two pieces of state
+that have no persistence of their own: GRE tunnels are re-added from the
+`gre_tunnels` config, and the dynamic nftables chains (`user_accept`,
+`user_dnat`, `gre_snat`, `client2client`, `dscp_mark`, `ct_helpers`) are
+rebuilt from `omr-admin-config.json`. Neither GRE interfaces nor nft rule
+*contents* survive a reboot/ruleset-reload on their own, so this replay is
+what makes them do so. The packaged `debian/omr-admin.service` is ordered
+after `nftables.service`, and the `debian/omr-admin-resync.conf` drop-in
+installed under `nftables.service.d/` try-restarts omr-admin after every
+nftables start or reload (both re-run `/etc/nftables.conf`, which begins with
+`flush ruleset`), so the replay is re-triggered whoever reloaded the firewall,
+instead of relying on them to also restart omr-admin by hand.
+
+## Authentication
+
+All endpoints except `/`, `/token`, `/login_basic`, `/clienthost` and `/mptcpsupport`
+require a JWT bearer token.
+
+- `POST /token` — OAuth2 password flow (`username` / `password` form fields).
+  Returns `{"access_token": "...", "token_type": "bearer"}`. Users are stored in
+  `omr-admin-config.json` under `users`.
+- `GET /login_basic` — HTTP Basic login that sets the token as an `Authorization`
+  cookie and redirects to `/docs` (used to access the Swagger UI from a browser).
+- `GET /logout` — clears the `Authorization` cookie.
+
+The token is accepted either as an `Authorization: Bearer <token>` header or as the
+`Authorization` cookie.
+
+### Permissions
+
+Each user has one of three permission levels:
+
+| Level   | Meaning |
+|---------|---------|
+| `ro`    | Read-only: configuration-changing endpoints return `{'result': 'permission'}` |
+| `rw`    | Read/write on the user's own configuration |
+| `admin` | Full access, including user management endpoints |
+
+### Response conventions
+
+Configuration endpoints return a JSON object of the form:
+
+```json
+{"result": "done|error|warning|permission", "reason": "...", "route": "<endpoint>"}
+```
+
+`warning` is typically returned when the target software is not installed on the VPS.
+
+## Endpoints
+
+### General / status
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Welcome banner (no auth) |
+| GET | `/status` | Server load average, uptime, release, traffic counters |
+| GET | `/config` | Full configuration for the current user (keys, ports, VPN/proxy settings…) |
+| GET | `/clienthost` | Client IP as seen by the server (no auth) |
+| GET | `/mptcpsupport` | Check whether the current connection uses MPTCP (no auth) |
+| GET | `/update` | Trigger the VPS update script (`omr-update` service) |
+| GET | `/openapi.json` | OpenAPI schema (auth required) |
+| GET | `/docs` | Swagger UI (auth required, see `/login_basic`) |
+| GET | `/speedtest?size=N` | Download speed test: streams N MiB (1–100, default 10) of zeroes; `X-MPTCP` header reports MPTCP status |
+| POST | `/speedtest` | Upload speed test: measures the received request body, returns bytes/duration/speed |
+
+### Proxy configuration
+
+| Method | Path | Body model | Description |
+|--------|------|------------|-------------|
+| POST | `/proxy` | `Proxy` | Select the proxy used by the current user. Accepts exactly the names `GET /config` advertises in `proxy.available` and `/proxy_list` returns: `shadowsocks`, `shadowsocks-go`, `shadowsocks-rust`, `v2ray[-vless/vmess/socks/trojan]`, `xray[-vless/vless-reality/vmess/socks/trojan/shadowsocks]`, `none` |
+| GET | `/proxy_list` | – | Proxy names installed on this server (same list as `proxy.available` in `GET /config`) |
+| POST | `/shadowsocks` | `ShadowsocksConfigparams` | Shadowsocks-libev settings: port, method, key, fast_open, reuse_port, no_delay, MPTCP, obfs (v2ray/obfs plugin, tls/http) |
+| POST | `/shadowsocks-go` | `ShadowsocksGoConfigparams` | Shadowsocks-Go settings: port, method, fast_open, reuse_port, MPTCP |
+| POST | `/v2ray` | `V2rayconfig` | Refresh V2Ray key/port in the user config |
+| POST | `/xray` | `Xrayconfig` | XRay settings: VLESS Reality toggle (auto-heals an empty/placeholder x25519 key pair), Shadowsocks 2022 method, transport (`tcp`, `grpc`, `xhttp`); also ensures the `omrin-tunnel` inbound carries a VLESS Reverse Proxy client (`reverse_key` in the response) used for VPS→LAN port forwarding |
+| POST | `/v2rayredirect` / `/xrayredirect` | `V2rayparams` / `Xrayparams` | Redirect a server port to the router through V2Ray/XRay (name, port, proto, optional destip/destport) |
+| POST | `/v2rayunredirect` / `/xrayunredirect` | idem | Remove such a redirection |
+| POST | `/xrayrpfredirect` | `Xrayparams` | Create or update one IPv4 TCP public port mapped to destip:destport over a dedicated XRay reverse connection (TLS pinned by the router; transport TCP 65444) |
+| POST | `/xrayrpfunredirect` | `Xrayparams` | Remove that user's dedicated reverse TCP forward by public port; UDP rules continue through the normal VPN |
+
+### VPN configuration
+
+| Method | Path | Body model | Description |
+|--------|------|------------|-------------|
+| POST | `/vpn` | `Vpn` | Select the VPN used by the current user (`openvpn`, `openvpn_bonding`, `glorytun_tcp`, `glorytun_udp`, `dsvpn`, `mlvpn`, `mqvpn`, `softether`, `none`) |
+| POST | `/glorytun` | `GlorytunConfig` | Glorytun key, port, chacha20 toggle |
+| POST | `/dsvpn` | `DSVPN` | DSVPN key and port |
+| POST | `/mlvpn` | `MLVPN` | MLVPN password, timeout, reorder buffer, loss tolerance, cleartext |
+| POST | `/mqvpn` | `MQVPN` | MQVPN key, scheduler, port (default 443), FEC (xor/reed_solomon/…), reinjection, congestion control (bbr2/bbr/cubic/…), reorder profile and per-port reorder rules |
+| POST | `/mqvpn_user` | `MQVPNUser` | Admin only: set or clear a fixed IP for an MQVPN user |
+| GET | `/mqvpn_users` | — | Admin only: list MQVPN users with, per name, `configured` (present in `/etc/mqvpn/server.json`, plus its `fixed_ip`), `known` (accepted by the running daemon, from the control socket's `list_users`) and `connected` (has a live session, from `get_status`); `known`/`connected` are `null` and `control.error` is set when the control socket can't be reached. Sessions authenticated with the server-wide `auth_key` (reported by the daemon as user `(global)`) are not listed as users but counted in `global_key_clients`. The control socket address is read from `control_listen` in `server.json` (default `127.0.0.1:9090`, wildcard binds reached via loopback) and echoed as `control.address`; warns if MQVPN isn't installed |
+| POST | `/mqvpn_dscp` | `MQVPNDscpParams` | Sync the current user's per-WAN DSCP class assignments (`pins: [{iface, dscp: [...]}]`) into MQVPN's per-path `dscp_mask`, pushed live over the control socket and persisted in `/etc/mqvpn/server.json`'s `path_policy` so it survives a restart/reconnect; warns if MQVPN isn't installed |
+| POST | `/mqvpn_weight` | `MQVPNWeightParams` | Sync the current user's per-WAN weights (`weights: [{iface, weight}]`) into MQVPN's per-path `weight`, same live + persisted push as `/mqvpn_dscp`; warns if MQVPN isn't installed |
+| POST | `/openvpn` | `OpenVPN` | OpenVPN TCP port and cipher |
+| POST | `/softethervpn` | `SoftEtherVPN` | SoftEther cipher and password |
+| POST | `/wireguard` | `WireGuard` | Replace the WireGuard peer list (`[{ip, key}]`) |
+| GET | `/wireguard/remote-access` | — | Authenticated read of the persistent remote WireGuard to OMR LAN gate: `{"supported": true, "lan_access": false}` by default. A missing helper returns 503. |
+| POST | `/wireguard/remote-access` | `{"lan_access": true/false}` | Primary user (`userid=0`, `rw`/`admin`) or primary administrator: enable or disable the global LAN gate. Read-only and secondary users receive 403; invalid body 422; helper failure 502/503. The API reads the state back after applying. Router GUI TCP 80/443 and VPS Internet routing remain available in either state. |
+| POST | `/vxlan` | `Vxlan` | VXLAN tunnel over the VPN: enable, mode (`l3` routed P2P, default, or `l2` bridged — clients sharing a VNI land on the same server-side bridge), VNI, UDP port (default 4789), local/remote IPv4+IPv6, MTU. Non-admin users may not set `vni` (admin-assigned only, see below). Returns `result: conflict` when the resulting VNI + port pair is already held by another user: Linux accepts a single VXLAN device per VNI and port, so users sharing a VNI must each have their own port. Default L3 addresses derive from the userid: `10.255.249.0/24` in /30 slices for userids 0–63, `10.255.224.0/20` for 64–1087, `fd00::b0<hex>:1/126` below 256 and `fd00::b<hex>:1/126` up to 4095; past those set `localip`/`remoteip`/`localip6`/`remoteip6` explicitly |
+| GET | `/vxlan_vnis` | — | Admin only: list every user's VNI/port/mode/enabled state, to review assignments and spot collisions before assigning one |
+| POST | `/vxlan_user` | `VxlanUser` | Admin only: assign a specific user's VNI, UDP port, mode or enabled state. Rejects a VNI already used by another user unless `force: true` is passed to deliberately merge them into the same L2 segment. A VNI + port pair already held by another user is always rejected, force or not, since the kernel refuses the second device (`A VXLAN device with the specified VNI already exists`); the one exception is a request that merely disables an already colliding user |
+| POST | `/vpnips` | `VPNips` | Set the user's VPN local/remote IPs (RFC1918 IPv4, optional IPv6/ULA) |
+
+Port changes update the matching VPN service's config file and restart the
+service when the on-disk file actually changed (MD5 comparison); the firewall
+rules needed to reach that port are handled separately by the nftables engine
+described below.
+
+### Firewall (nftables)
+
+Firewall enforcement is nftables-based (migrated from Shorewall). All state
+lives in `omr-admin-config.json` — per-user `fw_ports` entries plus global
+`bulk_redirect_v4`/`bulk_redirect_v6`/`client2client`/`sipalg` flags — and
+every change is re-rendered into the relevant dynamic chain of the `inet omr`
+table (`user_accept`, `user_dnat`, `gre_snat`, `client2client`, `dscp_mark`,
+`ct_helpers`) and applied as one atomic `nft -f -` transaction, so there's no
+MD5-diff-then-reload dance and no partial-apply window. The static base
+ruleset/chain declarations ship separately (`nftables` package plus the
+sibling `openmptcprouter-vps` repo's `nftables/omr.nft`); these endpoints
+only ever flush/repopulate chain *contents*. Endpoint paths keep their
+historical `/shorewall*` names for router/client compatibility even though
+Shorewall itself is no longer used.
+
+| Method | Path | Body model | Description |
+|--------|------|------------|-------------|
+| POST | `/shorewall` | `ShorewallAllparams` | Enable/disable the "redirect all ports (1–64999) to the router" DNAT rules (`redirect_ports`: `enable`/`disable`, `ipproto`: `ipv4`/`ipv6`), stored as `bulk_redirect_v4`/`bulk_redirect_v6` |
+| POST | `/shorewalllist` | `ShorewallListparams` | List the OMR-managed rules for the current user, read back from `fw_ports` and rendered in the Shorewall rules-file line layout (`DNAT\t\tnet\t\tvpn:...\tproto\tport\t# OMR user redirect name port proto`), which the router's `openmptcprouter-vps` init script greps and awk-splits to reconcile its port forwards |
+| POST | `/shorewallopen` | `Shorewallparams` | Open/redirect a port (name, port, proto, fwtype `ACCEPT`/`DNAT`, optional source_dip/source_ip/comment) |
+| POST | `/shorewallclose` | `Shorewallparams` | Remove a previously added rule |
+| POST | `/sipalg` | `SipALGparams` | Enable/disable SIP ALG via an nft `ct helper` object for SIP plus a rule assigning it (`ct_helpers` chain), replacing Shorewall's AUTOHELPERS/DONT_LOAD toggle |
+
+### Network settings
+
+| Method | Path | Body model | Description |
+|--------|------|------------|-------------|
+| POST | `/mptcp` | `MPTCPparams` | Server MPTCP settings: checksum, path manager, scheduler, syn retries, congestion control, and protocol-version specific knobs |
+| POST | `/mptcp_dscp` | `MPTCPDscpParams` | Sync the router's per-WAN DSCP pins (`pins: [{dscp, remote_id}]`) into bpf_dscp's `dscp_remote_id` map via `mptcp-scheduler-dscp.sh`; keyed by MPTCP remote endpoint id since every subflow shares one local IP on the VPS. Warns if `mptcp-dscp-manager` isn't installed |
+| POST | `/mptcp_weight` | `MPTCPWeightParams` | Sync the router's per-WAN weights (`weights: [{remote_id, weight}]`) into bpf_weight(_rr)'s `weight_remote_id` map via `mptcp-scheduler-weight.sh`, cleaning up remote ids dropped since the previous sync. Warns if `mptcp-weight-manager` isn't installed |
+| POST | `/dscp_classify` | `DscpClassifyParams` | Mirror the router's destination→DSCP classification (`entries: [{dscp, cidr}]`) into native per-class/family nft sets plus the `dscp_mark` chain's `ip[6] dscp set` rules, so the VPS's own outbound traffic to a proxied destination carries the same DSCP as the router→VPS leg. Warns if `nft` isn't installed |
+| POST | `/bypass` | `ByPass` | IPs to bypass (direct out via `intf` instead of the tunnel) |
+| POST | `/wan` | `Wanips` | Router WAN IPs (written to the Shadowsocks ACL white list) |
+| POST | `/lan` | `Lanips` | Current user's LAN subnets; updates OpenVPN iroutes when client2client is enabled and registers that user's prefixes for direct LAN-destination routing in the native MQVPN server when installed. An empty list revokes those prefixes. MQVPN control failure returns `result: warning` because direct LAN-destination routing is not yet active; the timer retries. Existing public-port forwarding through router-side DNAT does not depend on this registration. Prefix registration is independent of the WireGuard remote-access gate. |
+
+### User management (admin only)
+
+| Method | Path | Body model | Description |
+|--------|------|------------|-------------|
+| POST | `/add_user` | `NewUser` | Create a user: username, permission, default VPN/proxy, optional userid, keys, Shadowsocks port, public exit IP |
+| POST | `/modify_user` | `ModifyUser` | Change password, enabled/disabled state, VPN or proxy of a user |
+| POST | `/remove_user` | `RemoveUser` | Delete a user and all its per-user service configuration |
+| POST | `/add_user_note` | `ExistingUser` | Attach a free-form note to a user |
+| GET | `/list_users` | — | Dump the full user table |
+| GET | `/get-number-of-users` | — | Count of users (excluding the admin) |
+| POST | `/client2client` | `ClienttoClient` | Enable/disable client-to-client communication |
+| POST | `/serialenforce` | `SerialEnforce` | Enable/disable router serial-number enforcement |
+
+### Metrics and decision engine (`omr_metrics` module)
+
+These routes are provided by the optional [omr_metrics.py](../omr_metrics.py) module
+and mounted at startup when the module is importable. See
+[omr-decision-engine.md](omr-decision-engine.md) for the full description of the
+learning engine.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/metrics` | Stored router metrics for the current user |
+| POST | `/metrics` | Store metrics for one WAN interface |
+| GET | `/metrics/all` | Metrics of all users (admin only) |
+| GET | `/metrics/user` | Current user profile and metrics DB statistics |
+| GET | `/metrics/history` | Historical metrics (requires InfluxDB) |
+| GET | `/metrics/decision` | Model-assigned weight for each WAN interface |
+| GET | `/metrics/quality/forecast` | Link-quality forecast |
+| POST | `/metrics/decision/train` | Train the decision model |
+| POST | `/metrics/decision/reset` | Reset the decision model |
+| GET/POST | `/metrics/decision/auto` | Get/set the auto-learning state |
+| GET | `/metrics/prometheus` | Prometheus-format metrics export |
+| GET | `/metrics/engine` | Decision engine status |
+
+`/metrics` adds lightweight latest-snapshot `confidence` and `anomalies` fields
+per interface. `/metrics/decision` also returns per-interface `confidence` and
+`anomalies`; with InfluxDB history enabled those flags can include trend-based
+conditions such as rising loss, rising jitter, rising congestion, flapping, and
+gateway changes. `/metrics/prometheus` exposes current anomaly flags as
+`omr_interface_anomaly{username,interface,anomaly}` gauges.

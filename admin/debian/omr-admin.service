@@ -1,0 +1,16 @@
+[Unit]
+Description=OMR-Admin
+# nftables.service loads the base ruleset whose dynamic chains omradmin.py's
+# _nft_resync_all() repopulates at startup. The companion drop-in
+# omr-admin-resync.conf (installed under nftables.service.d/) restarts this
+# unit after every nftables start/reload, since both re-run `flush ruleset`.
+After=network.target network-online.target nftables.service
+
+[Service]
+Type=simple
+Restart=always
+ExecStart=/usr/bin/omradmin.py
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN CAP_IPC_LOCK CAP_SETGID CAP_SETUID CAP_SYS_CHROOT CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETFCAP
+
+[Install]
+WantedBy=multi-user.target

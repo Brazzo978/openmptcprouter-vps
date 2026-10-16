@@ -1,0 +1,61 @@
+--- a/net/ipv4/tcp_bbr1.c
++++ b/net/ipv4/tcp_bbr1.c
+@@ -1066,3 +1066,5 @@
+ module_init(bbr1_bbr_register);
+ module_exit(bbr1_bbr_unregister);
+ MODULE_AUTHOR("Van Jacobson <vanj@google.com>");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP bbr1 congestion control for OMR 3K");
+--- a/net/ipv4/tcp_bbr2.c
++++ b/net/ipv4/tcp_bbr2.c
+@@ -2363,3 +2363,5 @@
+ MODULE_AUTHOR("Yuchung Cheng <ycheng@google.com>");
+ MODULE_AUTHOR("Soheil Hassas Yeganeh <soheil@google.com>");
+ MODULE_AUTHOR("Priyaranjan Jha <priyarjha@google.com>");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP bbr2 congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr1_var.c
++++ b/net/ipv4/tcp_nanbbr1_var.c
+@@ -1243,3 +1243,5 @@
+ module_exit(nanbbr1_var_bbr_unregister);
+ 
+ MODULE_AUTHOR("Van Jacobson <vanj@google.com>");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr1_var congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr2_var.c
++++ b/net/ipv4/tcp_nanbbr2_var.c
+@@ -2458,3 +2458,5 @@
+ MODULE_AUTHOR("Neal Cardwell <ncardwell@google.com>");
+ MODULE_AUTHOR("Yuchung Cheng <ycheng@google.com>");
+ MODULE_AUTHOR("Soheil Hassas Yeganeh <soheil@google.com>");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr2_var congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr3_var.c
++++ b/net/ipv4/tcp_nanbbr3_var.c
+@@ -2474,3 +2474,5 @@
+ MODULE_AUTHOR("Kevin Yang <yyd@google.com>");
+ MODULE_AUTHOR("Arjun Roy <arjunroy@google.com>");
+ MODULE_AUTHOR("David Morley <morleyd@google.com>");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr3_var congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr2_light.c
++++ b/net/ipv4/tcp_nanbbr2_light.c
+@@ -2410,3 +2410,4 @@
+ MODULE_AUTHOR("Kevin Yang <yyd@google.com>");
+ MODULE_AUTHOR("Arjun Roy <arjunroy@google.com>");
+ MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr2_light congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr2_def.c
++++ b/net/ipv4/tcp_nanbbr2_def.c
+@@ -2410,3 +2410,4 @@
+ MODULE_AUTHOR("Kevin Yang <yyd@google.com>");
+ MODULE_AUTHOR("Arjun Roy <arjunroy@google.com>");
+ MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr2_def congestion control for OMR 3K");
+--- a/net/ipv4/tcp_nanbbr2_aggr.c
++++ b/net/ipv4/tcp_nanbbr2_aggr.c
+@@ -2410,3 +2410,4 @@
+ MODULE_AUTHOR("Kevin Yang <yyd@google.com>");
+ MODULE_AUTHOR("Arjun Roy <arjunroy@google.com>");
+ MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("TCP nanbbr2_aggr congestion control for OMR 3K");

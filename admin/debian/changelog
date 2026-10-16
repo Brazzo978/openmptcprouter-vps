@@ -1,0 +1,806 @@
+omr-vps-admin (0.18+20260910) unstable; urgency=medium
+
+  * Fix every boot logging "sysctl: setting key 'net.mptcp.path_manager': Couldn't write 'fullmesh'... ignoring: No such file or directory" and MPTCP silently staying on whatever path manager the kernel defaulted to: the router sends network.globals.mptcp_path_manager verbatim and that option still carries the out-of-tree v0.95 vocabulary (default/fullmesh/ndiffports/binder), while a mainline kernel registers exactly two path managers, 'kernel' and 'userspace' (net.mptcp.available_path_managers), and rejects any other name with ENOENT. POST /mptcp now maps a v0 name onto 'kernel' -- all four of them are in-kernel path managers -- through the new normalize_mptcp_path_manager(), before the sysctl call and before the value is persisted into 90-shadowsocks.conf, so the line stops failing at each boot
+  * Repair a net.mptcp.path_manager line an earlier version already persisted with a v0 name, at startup (normalize_persisted_mptcp_path_manager()): sysctl.d is applied at boot long before omr-admin starts, so that line just failed there every time and nothing rewrote it; the corrected value is applied immediately instead of waiting for the router's next /mptcp push. Names the running kernel does advertise, and every name on a kernel that advertises no list at all (a v0 kernel, where net.mptcp.mptcp_path_manager really does take 'fullmesh'), are left untouched
+  * Add unit tests for the path manager normalization (v0 names mapped, available and unknown names left alone, blank passthrough, no-op without an available list), for POST /mptcp normalizing before sysctl and in the persisted conf, and for the startup repair (test/test_api.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 10 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260909) unstable; urgency=medium
+
+  * Fix GET /config answering 500 on every single call on a VPS that has no IPv6 default route (Ysurac/openmptcprouter#4367): both interface detectors return None when the family has no default route and the legacy Shorewall params file is gone (it is, on every nftables box), so IFACE6 was None and passing it to subprocess raised "TypeError: expected str, bytes or os.PathLike object, not NoneType", which the callers' `except (subprocess.SubprocessError, OSError)` does not catch. The router treats any non-empty body as a config and therefore silently applied nothing (no MQVPN key, no Shadowsocks password), leaving the tunnel on the placeholder key and getting a 403 from the MQVPN server
+  * Read the interface address through a single _iface_global_addr(iface, family) helper instead of three copies of the same subprocess/regex block (GET /config's ipv6_network, GET /config's ipv4 fallback when the VPS has no internet, POST /shadowsocks' ipv6_network), so a missing or unusable interface yields an empty string on all three paths; TypeError is kept in the except tuple as defence in depth
+  * _iface_global_addr() re-detects the interface when the module constant is empty: IFACE/IFACE6 are evaluated once at import, so an omr-admin started before the default route for that family existed (RA/DHCPv6 still pending at boot) reported no address for the whole process lifetime, and once set_global_param() had persisted the empty ipv6_network nothing corrected it; the re-detection only reads the kernel routing table through netifaces
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 09 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260908) unstable; urgency=medium
+
+  * Log a failed login where fail2ban can count it, and only when it is really one: new log_auth_failure() emits "omr-admin: authentication failure from <ip>" at WARNING for a rejected credential pair on POST /token and GET /login_basic. Until now nothing logged a failed login with the client address (authenticate_user() only had LOG.debug lines with no IP, invisible at log_level='info'), so the fail2ban omradmin jail had to parse uvicorn's access log for "POST /token" 400 and "GET /login_basic" 401 -- and those two statuses also cover a router that has no VPS key yet (fresh flash or mid-wizard) polling /token with an empty password, and a browser drawing the Basic-auth challenge on its first /docs request. Routers consequently banned themselves out of the API they were being configured from (the ban rejects tcp/65500, so the router only reported "can ping server vps, no server API answer"), and six /docs visits banned the operator. The marker is therefore skipped when either half of the pair is empty and when there is no Authorization header at all, which only omr-admin can tell apart; HTTP responses are unchanged (400/token, 401/login_basic), and the matching filter ships in openmptcprouter-vps (fail2ban-filter-omradmin.conf, needs this version or newer)
+  * log_auth_failure() logs the peer address and nothing else on purpose: a username echoed into that line could carry a newline and forge a second line matching the filter with any <HOST> in it, which would turn the jail into a way to have arbitrary addresses banned
+  * Stop logging a few dozen nft "Error: Could not process rule: No such file or directory" lines at every startup that happens before the base ruleset is loaded: on a VPS install/update our own deb restarts omr-admin from its postinst while /etc/nftables.conf hasn't been loaded yet, so the whole startup resync (user_accept, user_dnat, gre_snat, client2client, the 10 DSCP set declarations, dscp_mark) fails against a table inet omr that doesn't exist, once per uvicorn process. Nothing was lost -- nftables.service's omr-admin-resync drop-in restarts omr-admin right after the load and that pass lands the state -- so _nft_resync_all() now checks the table is there and otherwise skips the firewall resync with a single INFO line saying it runs again on the nftables.service restart; /etc/openvpn/tun0.conf's client-to-client sync isn't nftables state and keeps running either way
+  * _nft_run() reports a failed apply as debug instead of warning when the base table is absent (probed with `nft list table inet omr` only on failure), so a firewall change pushed by the router in that same window no longer warns about something the queued restart already fixes
+  * Collapse nft's stderr into one journal line: nft prints three lines per problem (diagnostic, the offending input line echoed back, a caret line) and a single script can carry a problem per element, so one failed apply of the DSCP set declarations alone was 30+ lines; identical diagnostics are now deduplicated with an "(xN)" count and their file:line:col prefix stripped
+  * Report a kernel without MPTCP BPF scheduler support once instead of a multi-line libbpf warning per shipped object per uvicorn worker (8 objects x 2 workers at every startup on a VPS not yet rebooted into the OMR kernel): the "not found in kernel BTF" / "not found in kernel or module BTFs" failures are collected and logged as one INFO line listing the skipped schedulers, since that's a property of the running kernel and not of the files; any other load failure still warns, now on a single line
+  * Add unit tests for the missing-base-table paths (the warning/debug split in _nft_run, _nft_resync_all skipping the nft syncs while still syncing tun0.conf) and the stderr summary (test/test_nft.py), and for the BPF-unsupported detection (test/test_api.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 08 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260907) unstable; urgency=medium
+
+  * Fix POST /proxy answering 422 ("Input should be 'v2ray', 'v2ray-vless', ... or 'none'") for xray-vless-reality, a name GET /config has advertised in proxy.available since VLESS Reality support was added (0.5+20231017) while the PROXY validation enum was never given it: the router builds its proxy list from proxy.available and posts the chosen name straight back, so selecting "XRay VLESS Reality" in the wizard could never be applied on the VPS and the log only showed the rejection as an [INFO] line
+  * Build proxy.available (GET /config) and GET /proxy_list from the same _installed_proxy_types() helper instead of a list hardcoded in /config, so a name can no longer be advertised on one side and refused on the other; proxy.available consequently also lists shadowsocks-rust (accepted by POST /proxy, and the router's own default, but never advertised) and, like /proxy_list, now only lists the proxies whose service file is actually present on this VPS
+  * Fix GET /config reporting v2ray.tx/rx and xray.tx/rx as 0 for every protocol variant: the counters were only read when the selected proxy was exactly 'v2ray' or 'xray', so xray-vless-reality, xray-vmess, xray-shadowsocks, v2ray-trojan, ... showed no traffic at all although they are served by the same process; both guards now match the name by substring like /status already did
+  * Add unit tests locking the advertised names to the values POST /proxy accepts, the presence of every name the router can select and the equality of proxy.available and /proxy_list, and covering the traffic counters for every v2ray/xray variant (test/test_api.py); document the accepted proxy names and GET /proxy_list in docs/api.md
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 07 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260906) unstable; urgency=medium
+
+  * Add GET /mqvpn_users (admin only) listing MQVPN users with, per name, whether it is persisted in /etc/mqvpn/server.json (with its fixed_ip), known by the running daemon (control socket list_users) and currently connected (get_status); the three can differ since add_mqvpn() persists a user even when the live add_user call fails and the daemon only learns it on restart, which now shows up as configured but not known. Keys are not returned; known/connected are null and control.error is set when the control socket is unreachable
+  * mqvpn_api() connects to the address in server.json's control_listen (HOST:PORT or [V6]:PORT, wildcard binds reached via loopback) instead of a hardcoded 127.0.0.1:9090, which remains the fallback when the key is missing or malformed
+  * Add unit tests for /mqvpn_users and the control_listen parsing (test/test_api.py); document /mqvpn_users in docs/api.md
+  * Fix POST /vxlan_user force=true merging two users onto the same VNI while both stayed on the default UDP port 4789: Linux refuses a second VXLAN device with the same VNI on the same dstport whatever the local/remote addresses ("A VXLAN device with the specified VNI already exists"), so the second user's omr-vxlan@ unit failed at ip link add and that user had no tunnel at all. /vxlan_user now also takes a port; a VNI+port pair already held by another user is rejected regardless of force, which only bypasses the plain shared-VNI warning (the one exception is a request that merely disables an already colliding user); POST /vxlan applies the same pair check when a user enables the tunnel or changes their own port; GET /vxlan_vnis lists the port next to the VNI; vni (0-16777215) and port (1-65535) are range-checked on both models
+  * Fix the userid-derived VXLAN L3 default addresses: 10.255.249.<userid*4+1>/30 overflowed past .255 from userid 64 on and fd00::b0<hex(userid)> grew a fifth hex digit from userid 256 on. Userids 0-63 keep their 10.255.249.0/24 slice, 64-1087 continue into 10.255.224.0/20 (unused by any other OMR component), 256-4095 use fd00::b<hex>:x (disjoint from the historical b0<hex> groups); past those pools no default is derived, write_vxlan_conf() omits the LOCALTUNIP lines with a warning and localip/localip6 must be set explicitly
+  * GET /mqvpn_users no longer lists sessions authenticated with the server-wide auth_key, which the daemon's get_status reports as user "(global)", as a connected user; they are counted in a new top-level global_key_clients field (null when get_status is unavailable)
+  * Add unit tests for the VNI+port pair check on /vxlan and /vxlan_user, the port field, the id range checks and the derived address pools (test/test_vxlan.py) and for the "(global)" handling (test/test_api.py); document the pair rule, the port and the default address pools in docs/api.md
+  * Fix install_omr-ai.sh failing on every fresh install with current influxdb3-core (3.10/3.11) at the admin token bootstrap step (Ysurac/openmptcprouter#4366): the CLI parses "create token --admin" as its own sub-command and rejects "--host ... --admin" with "unexpected argument '--host' found", and since stderr was discarded the empty result was reported as "An admin token exists in the InfluxDB 3 catalog but /etc/influxdb3/omr-influxdb.env is missing or has no token"; the flags are now ordered "--admin --host ... --format json" (accepted by every 3.x release), only the "token name already exists" reply (printed by the CLI on stdout with exit 0) is treated as an existing token, and any other failure is shown verbatim instead
+  * install_omr-ai.sh honours RESET_DATA, INSTALL_AI, INFLUX_RETENTION and INFLUX_RETENTION_DAYS from the environment: the error text told users to re-run with RESET_DATA="true" but the script unconditionally reset it to "false", so `sudo RESET_DATA=true sh install_omr-ai.sh` ran into the same error; the wipe path waits for the restarted server and re-checks the bootstrap result instead of dying with a generic message after the data is gone
+  * install_omr-ai.sh writes /etc/influxdb3/omr-influxdb.env right after the token is created instead of at the very end, so a failure in the later pip/PyTorch/download steps no longer loses a token that is never shown again and leaves the next run in the "token exists but creds file missing" dead end
+  * Add unit tests for install_omr-ai.sh (test/test_install_omr_ai.py): the admin-token bootstrap section is extracted from the shipped script and run under sh against fake influxdb3/systemctl/curl binaries that reproduce the 3.10/3.11 CLI behaviour (legacy flag order rejected, token JSON on a fresh catalog, "token name already exists" with exit 0 otherwise), covering the flag order, the environment overrides of RESET_DATA/INSTALL_AI/INFLUX_RETENTION*, the explicit "creds lost" refusal, the RESET_DATA=true wipe sequence and the verbatim reporting of other CLI errors; conftest gains a real_env marker to opt such tests out of the autouse open/subprocess mocks
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 06 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260903) unstable; urgency=medium
+
+  * Fix POST /shorewalllist (and /firewalllist) returning a free-form summary line since the nftables migration instead of the Shorewall rules-file line layout the router's openmptcprouter-vps init script still parses: _vps_firewall_redirect_port greps "<port>\t# OMR <user> redirect router <port> port <proto>" to know a port is already handled and _vps_firewall_close_port awk-splits the columns ($1 type, $2 net[:source-host], $4 proto, $5 port, $6 "-", $7 original-destination) to decide what to close, so the router re-issued /shorewallopen for every port on every set_vps_firewall pass (config rewrite + user_dnat/user_accept chain flush each time), then fired /shorewallclose with garbage columns for every line, and ports removed on the router were never closed on the VPS; _legacy_fw_line() now renders each fw_ports entry byte-compatible with what the Shorewall-era omr-admin wrote to /etc/shorewall/rules
+  * /shorewalllist selects entries on the "# OMR <user> <name>" comment prefix the router asks for ("redirect router", "open router") like the Shorewall-era grep on the rules file did, instead of mapping the name to a bare ACCEPT/DNAT fwtype filter, so installer-opened services with other names never end up in the router's "close what I don't know" pass
+  * Ignore /shorewallopen requests whose fwtype is neither ACCEPT nor DNAT (routers push "REDIRECT" for a traffic rule saved without a target): the Shorewall implementation wrote nothing for those, but the nftables one stored them in fw_ports forever while rendering nothing; legacy entries of that kind are pruned from fw_ports on the next open/close for the same user
+  * Skip the omr-admin-config.json rewrite and the user_accept/user_dnat chain resync when /shorewallopen re-posts an entry identical to one already stored, which routers do for every known port on each reconciliation pass
+  * Order omr-admin.service after nftables.service and ship an nftables.service.d drop-in (debian/omr-admin-resync.conf) whose ExecStartPost/ExecReload try-restart omr-admin, so any start, restart or reload of nftables (each re-runs /etc/nftables.conf, which begins with `flush ruleset` and thereby empties the user_accept/user_dnat/gre_snat/dscp_mark/ct_helpers chains) re-triggers _nft_resync_all() and repopulates the chains from omr-admin-config.json; previously only the VPS installer's update path restarted omr-admin after nftables, and since /shorewalllist is rendered from the persisted fw_ports rather than the live ruleset the router now treats such ports as already handled and no longer re-pushes them; postinst runs daemon-reload so the drop-in takes effect on upgrade
+  * Add unit tests for the legacy line layout and the router-side grep/awk contract, the name/family selection, the unsupported-fwtype handling and the identical re-POST no-op (test/test_nft.py); document the /shorewalllist line layout in docs/api.md
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 03 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260902) unstable; urgency=medium
+
+  * Fix recurring "Could not process rule: No such file or directory" journal errors from the SIP ALG nftables sync (issue #4361): the installer blacklists nf_conntrack_sip, and a blacklist also stops the kernel's alias autoload when the ct helper object is created, so _nft_ensure_ct_helpers() now modprobes the module explicitly (which ignores blacklists) before adding the sip_udp/sip_tcp helper objects
+  * Disabling SIP ALG now only flushes the ct_helpers chain instead of first re-creating the helper objects, which could only fail on the shipped default (module blacklisted, SIP ALG off) and was re-triggered by the router re-POSTing /sipalg on every sync cycle
+  * Default sipalg to off in the startup resync, matching the router's own default (uci openmptcprouter.settings.sipalg unset) and the blacklisted module, so a fresh install no longer logs ct-helper failures at boot
+  * POST /sipalg now returns an error instead of 'done' when the conntrack helpers could not be applied (previously answered 200 OK with nothing applied)
+  * Log a warning when the MQVPN control API rejects an add_user/remove_user call instead of silently discarding the result
+  * Add unit tests for the /sipalg error contract (test/test_api.py) and the sipalg sync behavior on enable/disable/failure (test/test_nft.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 02 Sep 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260831) unstable; urgency=medium
+
+  * Fix POST /mptcp scheduler set failing with ENOENT when the router sends a BPF scheduler's .o filename stem (e.g. mptcp_bpf_red) instead of the name the kernel registers it under (e.g. bpf_red); normalize_mptcp_scheduler() now maps filename stems from /usr/share/bpf/scheduler to their struct_ops name before it reaches sysctl
+  * load_mptcp_bpf_schedulers() applies the same normalization when re-applying the scheduler after a BPF load, and persists the corrected value back into /etc/sysctl.d/90-shadowsocks.conf so a stale prefixed entry self-heals instead of failing forever
+  * Add GET /vpn_list and /proxy_list, returning the VPN/Proxy types actually installed on this VPS (mirroring the same "is it installed" file checks each /<vpn> and /<proxy> POST endpoint already guards on)
+  * Fix omr_metrics InfluxDB3 retention sync issuing a PATCH after a 409 Conflict: InfluxDB 3 Core has no endpoint to change retention_period on an existing database (Enterprise-only), so PATCH always 404s there; a 409 now just means the installer already created the database and is treated as done, with backoff retries reserved for actual transient failures
+  * Add unit tests for the scheduler normalization (test/test_api.py) and the revised retention-sync behavior (test/test_metrics.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 31 Aug 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260824) unstable; urgency=medium
+
+  * Migrate firewall enforcement from Shorewall to nftables: dynamic chains (user_accept, user_dnat, gre_snat, client2client, dscp_mark, ct_helpers) of the "inet omr" table are rendered from pure functions of omr-admin-config.json and applied as atomic `nft -f -` transactions, replacing the previous file-edit + MD5-diff + service-reload dance
+  * Add POST /firewall, /firewalllist, /firewallopen, /firewallclose as the nftables-backed replacements for /shorewall, /shorewalllist, /shorewallopen, /shorewallclose; the /shorewall* paths are kept as deprecated aliases for router/client compatibility
+  * /dscp_classify now mirrors destination->DSCP classification into native per-class/family nft sets plus the dscp_mark chain instead of ipset + a Shorewall mangle block; warns if nft isn't installed instead of ipset
+  * /sipalg now toggles an nft ct helper object (sip_udp/sip_tcp) instead of Shorewall's AUTOHELPERS/DONT_LOAD config lines
+  * Persist bulk port-redirect state (formerly /shorewall) as bulk_redirect_v4/bulk_redirect_v6, and per-user opened/redirected ports as fw_ports, in omr-admin-config.json
+  * Rebuild every dynamic nft chain from persisted state at each process startup, since nft rule content does not survive a ruleset reload/reboot on its own (mirrors the existing GRE tunnel replay)
+  * Detect the WAN interface(s) from the default route via netifaces instead of parsing Shorewall's params.net, falling back to that file for boxes still mid-migration
+  * Add nftables to debian/control dependencies
+  * Retry the InfluxDB3 retention-policy push with exponential backoff, to absorb InfluxDB3 still starting up right after boot
+  * Add an auto-learning guard (min_available_mb, default 512) that skips a training round when free RAM is below threshold, re-checked every interval
+  * Offload synchronous metrics helpers (user/history reads, interface writes) to a thread pool so they no longer block the event loop
+  * Add unit tests for the new nftables engine (test/test_nft.py) and update test/test_dscp_sync.py for the nft-based /dscp_classify implementation
+  * Document the Shorewall->nftables migration and new /firewall* endpoints in docs/api.md
+  * Persist /dscp_classify's entries into omr-admin-config.json and replay them from _nft_resync_all() at startup, so an nftables restart (e.g. the VPS update path) doesn't leave the dscp sets empty until the router's own periodic, content-diffed re-push happens to notice
+  * Extract the OpenVPN tun0.conf `client-to-client` line rewrite into _sync_openvpn_client2client() and also call it from _nft_resync_all() at startup, since the sibling openmptcprouter-vps install/update script unconditionally regenerates tun0.conf from its shipped template and silently drops that line
+  * Add unit tests for the dscp_classify resync/persistence and the OpenVPN client2client resync (test/test_dscp_sync.py, test/test_nft.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 24 Aug 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260820) unstable; urgency=medium
+
+  * Fix POST /mptcp raising a raw 422 instead of its own error contract when a v1-only field (close_timeout, pm_type, stale_loss_cnt, syn_retrans_before_tcp_fallback) is posted as an empty string by a router where the matching uci option was never set (issue #4350); blank now coerces to the field's documented default
+  * Add regression tests for the blank-field coercion (test/test_api.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 20 Aug 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260813) unstable; urgency=medium
+
+  * Add POST /mptcp_dscp to sync the router's per-WAN DSCP pins into bpf_dscp's dscp_remote_id map, keyed by MPTCP remote endpoint id since every subflow shares one local IP on the VPS
+  * Add POST /mptcp_weight to sync the router's per-WAN weights into bpf_weight(_rr)'s weight_remote_id map the same way, cleaning up remote ids dropped since the previous sync
+  * Add POST /dscp_classify to mirror the router's destination->DSCP classification into per-class/family ipsets plus an idempotent Shorewall mangle block, so the VPS's own outbound traffic to a proxied destination carries the same DSCP as the router->VPS leg
+  * Add POST /mqvpn_dscp and POST /mqvpn_weight, the MQVPN analogues of /mptcp_dscp and /mptcp_weight: per-path dscp_mask/weight pushed live over the control socket and persisted in server.json's path_policy so they survive a restart/reconnect
+  * Document the new DSCP/weight sync endpoints in docs/api.md
+  * Add unit tests for the new endpoints (test/test_dscp_sync.py)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 13 Aug 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260803) unstable; urgency=medium
+
+  * Add VXLAN L2 mode: bridge clients sharing a VNI into the same server-side LAN segment (br-vxlan<vni>) instead of only routed L3 point-to-point tunnels
+  * Add GET /vxlan_vnis (admin) to list every user's VNI/mode/enabled state
+  * Add POST /vxlan_user (admin) to assign a user's VNI, mode or enabled state, rejecting a VNI already used by another user unless force is passed to merge them deliberately
+  * Restrict non-admin users from setting their own VNI (admin-assigned only)
+  * Fix /vxlan partial updates wiping previously set fields instead of merging onto the existing config
+  * Document the VXLAN L2 mode and new admin endpoints in docs/api.md
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 03 Aug 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260724) unstable; urgency=medium
+
+  * Add DSCP traffic-class routing: GET /metrics/decision?dscp=true scores every WAN interface against standard DSCP classes (voice, video, bulk, ...) with per-class forecast horizon and returns a routing recommendation per class
+  * Add per-interface decision confidence and anomaly flags to /metrics, /metrics/decision and Prometheus export (offline, unreachable, stale_metrics, high_loss, high_jitter, high_congestion, flapping, gateway_changed, rising_loss, rising_jitter, rising_congestion)
+  * Limit all-interface InfluxDB history queries per interface in SQL, and serialize JSON backend writes with a lock
+  * Enforce a username validation pattern on user-management endpoints (add_user, add_user_note, remove_user, modify_user)
+  * Reject login and token issuance for disabled users instead of only blocking them after authentication
+  * Document DSCP routing, confidence/anomaly fields and updated feature vector in docs/omr-decision-engine.md and docs/api.md
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 24 Jul 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260720) unstable; urgency=medium
+
+  * Add closed-loop online auto-learning to the decision engine: periodically labels each user's interfaces from observed load-independent link quality (loss, BBR min_rtt, jitter, availability) and fine-tunes the model without human feedback
+  * Add GET/POST /metrics/decision/auto to check status and enable/disable auto-learning at runtime, persisted to omr-admin-config.json
+  * Add watchdog resetting the model to its heuristic initialisation after repeated divergent training losses
+  * Add optional exploration: occasionally perturb a decision so the model observes counterfactuals
+  * Add VLESS Reverse Proxy client support in xray config (xray 26+ tunnel bridge), exposed as reverse_key in xray config output
+  * Fix xray VLESS Reality failing to start with an empty/placeholder private key by regenerating the x25519 key pair
+  * Add transport to xray config output
+  * Add auto_learning defaults to install_omr-ai.sh and document the new endpoints and config block
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 20 Jul 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260717) unstable; urgency=medium
+
+  * Add VXLAN support: POST /vxlan endpoint to set up a VXLAN L2 tunnel over the VPN, config exposed in /config
+  * Add MQVPN packet reorder support: reorder settings (off/on/auto, max_wait_ms, cap_packets) and per-port reorder rules
+  * Add Prometheus exporter for metrics: GET /metrics/prometheus returns all users' WAN metrics in Prometheus text format (admin only)
+  * Use neural network for metrics forecast: small MLP with exponential sample weighting replaces linear regression when enough history is available
+  * Add RTT to metrics forecast
+  * Give latency higher priority in the decision engine: raise inv_latency and trend_latency weights, tighten latency normalization from 2000ms to 500ms
+  * Update MQVPN firewall rules on port change so any port (e.g. 443) can be used
+  * Fix xray failing to start when an empty shadowsocks method was written to its config
+  * Fix log error on BPF scheduler load: retry sysctl with backoff and report stderr on failure
+  * Fix bugs, remove duplicate and unused code in omr_metrics
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 17 Jul 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260625) unstable; urgency=medium
+
+  * Add EMA (Exponential Moving Average) weight to metrics decision engine
+  * Add predictive congestion handling in omr_metrics
+  * Increase metrics data retention to 60 days, add configurable retention parameter
+  * Add user information to metrics
+  * Fix mqvpn user sync
+  * Add standalone mode wrapper for omr_metrics (omr_metrics_standalone.py)
+  * Add docker-compose configuration for Standalone mode
+  * Fix install_omr-ai DB IP and port (65551)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 25 Jun 2026 00:00:00 +0200
+
+omr-vps-admin (0.18+20260610) unstable; urgency=medium
+
+  * Add username query parameter to GET /config for admin user lookup by name
+  * Return proper error response when userid has no matching user in GET /config
+  * Filter uvicorn access logs from 127.0.0.1
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 10 Jun 2026 00:00:00 +0200
+
+omr-vps-admin (0.18) unstable; urgency=medium
+
+  * Add optional omr_metrics module: per-interface WAN metrics storage and retrieval (JSON and InfluxDB 3.x backends)
+  * Add decision engine in omr_metrics: PyTorch MLP scorer with heuristic fallback assigning ip route nexthop weights from interface metrics
+  * Add cost field per WAN interface: lower cost biases routing decision weight toward that interface
+  * Add predictive mode for decision engine: linear regression on historical metrics with configurable horizon (predict=true&horizon=N on GET /metrics/decision, InfluxDB required)
+  * Add online learning endpoint POST /metrics/decision/train for fine-tuning the scorer from operator feedback
+  * Load MPTCP BPF schedulers at startup from /usr/share/bpf/scheduler and re-apply configured scheduler after registration
+  * Add MPTCP upstream kernel parameters to /config and POST /mptcp: close_timeout, pm_type, stale_loss_cnt, syn_retrans_before_tcp_fallback
+  * Fix MPTCP sysctl handling for upstream kernel: use net.mptcp.scheduler/path_manager/syn_retries instead of mptcp_* names, write correct sysctl.d entries per kernel variant
+  * Fix deprecation warning: replace datetime.utcnow() with datetime.now(timezone.utc)
+  * Fix crash on startup when users list is missing from omr-admin-config.json
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 05 Jun 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260523) unstable; urgency=medium
+
+  * Sync shadowsocks-rust users to xray and mqvpn at startup via FastAPI lifespan handler
+  * Fix MPTCP BPF scheduler warning on service restart: treat "File exists" as already-loaded instead of an error
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 23 May 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260518) unstable; urgency=medium
+
+  * Fix easyrsa failure when recreating a user: remove stale PKI index entry, private key, issued cert and .req file before build-client-full
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 18 May 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260511) unstable; urgency=medium
+
+  * Fix vpnips: remove /126 prefix length from IPv6 addresses written to shorewall6 params
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 11 May 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260505) unstable; urgency=medium
+
+  * Fix excessive physical I/O: cache get_omr_version() result at first call instead of scanning /etc/* on every /status and /config request
+  * Fix /speedtest POST: replace UploadFile (which spooled uploads to disk) with request.stream() to avoid double disk I/O per upload test
+  * Fix --workers CLI argument type: was str instead of int, making the flag non-functional
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 05 May 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260504) unstable; urgency=medium
+
+  * Add MQVPN congestion control (cc) support: bbr2|bbr|cubic|new_reno|copa|unlimited
+  * Add MQVPN fec_scheme, reinjection_mode, cc enums with validation
+  * Add MQVPN per-user fixed IP support via /mqvpn_user endpoint
+  * Expose MQVPN fixed_ip and full config (fec, reinjection, cc) in /config response
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 04 May 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260417) unstable; urgency=medium
+
+    * Return error if OpenVPN certificate creation fails when adding user
+    * Auto-create OpenVPN certificate for existing users if missing
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 17 Apr 2026 00:00:00 +0200
+
+omr-vps-admin (0.17+20260415) unstable; urgency=medium
+
+    * fix openvpn remove user
+    * add mqvpn user in JSON and not only in API
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 15 Apr 2026 11:58:34 +0200
+
+omr-vps-admin (0.17+20260414) unstable; urgency=medium
+
+    * Check if proxy/vpn exists before adding user
+    * some stability fix
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 14 Apr 2026 17:43:26 +0200
+
+omr-vps-admin (0.17+20260407) unstable; urgency=medium
+
+    * Add mqvpn support
+    * optimize code
+    * add cython support
+    * Rename to omradmin.py
+    * Add unit tests
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 07 Apr 2026 10:01:21 +0200
+
+omr-vps-admin (0.16+20260113) unstable; urgency=medium
+
+    * Fix uvloop issue with unicorn
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 13 Jan 2026 15:38:14 +0200
+
+omr-vps-admin (0.16+20251202) unstable; urgency=medium
+
+    * Add XRay protocol settings (gRPC, TCP, xHTTP)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 12 Dec 2025 09:19:21 +0200
+
+omr-vps-admin (0.16+20251126) unstable; urgency=medium
+
+    * Fix IPv6 (https://github.com/Ysurac/openmptcprouter/issues/4155)
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 26 Nov 2025 16:19:12 +0200
+
+omr-vps-admin (0.16+20250918) unstable; urgency=medium
+
+    * Fix invalid escape sequence
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 18 Sep 2025 09:37:26 +0200
+
+omr-vps-admin (0.16+20250909) unstable; urgency=medium
+
+    * Fix CRL permission
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 09 Sep 2025 15:20:14 +0200
+
+omr-vps-admin (0.16+20250829) unstable; urgency=medium
+
+    * Increase CRL expiration date
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 29 Aug 2025 14:28:55 +0200
+
+omr-vps-admin (0.16+20250812) unstable; urgency=medium
+
+    * Fix on SoftEther data usage
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 12 Aug 2025 08:18:34 +0200
+
+omr-vps-admin (0.16+20250806) unstable; urgency=medium
+
+    * Add initial SoftEther VPN suppport
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 08 Aug 2025 10:56:21 +0200
+
+omr-vps-admin (0.15+20250721) unstable; urgency=medium
+
+    * Fix a typo
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 21 Jul 2025 14:25:14 +0200
+
+omr-vps-admin (0.15+20250717) unstable; urgency=medium
+
+    * Don't restart OpenVPN when user removed
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 17 Jul 2025 16:30:28 +0200
+
+omr-vps-admin (0.15+20250519) unstable; urgency=medium
+
+    * Add XRay multi IPs support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 19 May 2025 17:18:30 +0200
+
+omr-vps-admin (0.14+20250410) unstable; urgency=medium
+
+    * Fix IPv6 detection
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 10 Apr 2025 19:30:23 +0200
+
+omr-vps-admin (0.14+20250319) unstable; urgency=medium
+
+    * Fix VPN IPs in Shorewall params.vpn
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 19 Mar 2025 09:35:48 +0200
+
+omr-vps-admin (0.14+20250318) unstable; urgency=medium
+
+    * Fix V2Ray/XRay API ports
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 18 Mar 2025 09:53:21 +0200
+
+omr-vps-admin (0.14+20250220) unstable; urgency=medium
+
+    * Fix XRay multi users
+    * Better log
+    * Various small fixes
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 20 Feb 2025 15:39:12 +0200
+
+omr-vps-admin (0.14+20241216) unstable; urgency=medium
+
+    * Fix typos
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 16 Dec 2024 15:41:21 +0200
+
+omr-vps-admin (0.14+20241125) unstable; urgency=medium
+
+    * Block removal of userid 0
+    * Add XRay users via API
+    * Fix Shorewall IPv6 delete rules
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 25 Nov 2024 10:09:35 +0200
+
+omr-vps-admin (0.14+20241025) unstable; urgency=medium
+
+    * Fix remove user
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 25 Oct 2024 11:50:30 +0200
+
+omr-vps-admin (0.13+20241025) unstable; urgency=medium
+
+    * Fix Shadowsocks-go new API support on add/remove user
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 25 Oct 2024 10:09:14 +0200
+
+omr-vps-admin (0.13+20241016) unstable; urgency=medium
+
+    * Add Shadowsocks-go new API support
+    * Add option to disable 6in4
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 16 Oct 2024 15:49:13 +0200
+
+omr-vps-admin (0.12+20240920) unstable; urgency=medium
+
+    * Fix Shadowsocks-go changes
+    * Fix Shadowsocks-libev changes
+    * Fix MPTCP support check
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 20 Sep 2024 08:09:20 +0200
+
+omr-vps-admin (0.12+20240827) unstable; urgency=medium
+
+    * Add support for "none" encryption with Shadowsocks-go
+    * Check if there is really a modification before modifying config file
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 27 Aug 2024 15:14:37 +0200
+
+omr-vps-admin (0.12+20240819) unstable; urgency=medium
+
+    * Add LAN IPs info in status return
+    * Remove PKI req when user removed
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 19 Aug 2024 17:27:12 +0200
+
+omr-vps-admin (0.12+20240802) unstable; urgency=medium
+
+    * Keep IPv6 network and addr in config
+    * Keep same secret key for token due to multiple workers in config
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 02 Aug 2024 15:25:34 +0200
+
+omr-vps-admin (0.12+20240801) unstable; urgency=medium
+
+    * Fix when Shadowsocks-libev is not installed
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 01 Aug 2024 08:50:17 +0200
+
+omr-vps-admin (0.12+20240725) unstable; urgency=medium
+
+    * Add server workers
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 25 Jul 2024 08:26:12 +0200
+
+omr-vps-admin (0.11+20240723) unstable; urgency=medium
+
+    * Remove netjson dependency and endpoint using it
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 23 Jul 2024 15:01:25 +0200
+
+omr-vps-admin (0.11+20240705) unstable; urgency=medium
+
+    * psutil.cpu_freq only available in psutil >5.1.0 put request in a try/except block
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 05 Jul 2024 17:44:31 +0200
+
+omr-vps-admin (0.11+20240704) unstable; urgency=medium
+
+    * Use subprocess for ss -M command
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 04 Jul 2024 11:40:03 +0200
+
+omr-vps-admin (0.11+20240629) unstable; urgency=medium
+
+    * Add a timeout on ss -M command
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sat, 29 Jun 2024 06:55:12 +0200
+
+omr-vps-admin (0.11+20240625) unstable; urgency=medium
+
+    * Add memory, hard disk and CPU usage in status endpoint
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 25 Jun 2024 15:12:44 +0200
+
+omr-vps-admin (0.10+20240531) unstable; urgency=medium
+
+    * Add option to disable GRE tunnels
+    * Add more Debug logs
+    * Don't set VPN IPs if not really needed
+    * Disable set_lastchange function not used and not working
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 31 May 2024 13:17:23 +0200
+
+omr-vps-admin (0.9+20240528) unstable; urgency=medium
+
+    * Add SOF-67: Returning total number of users by Dillon Ward
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 28 May 2024 14:50:19 +0200
+
+omr-vps-admin (0.9+20240516) unstable; urgency=medium
+
+    * Fix Shadowsocks-Go user creation
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 16 May 2024 16:43:12 +0200
+
+omr-vps-admin (0.9+20240426) unstable; urgency=medium
+
+    * Fix V2Ray/XRay json data retrieve
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 24 Apr 2024 15:03:41 +0200
+
+omr-vps-admin (0.9+20240324) unstable; urgency=medium
+
+    * Fix Shadowsocks Rust stats error
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 24 Mar 2024 21:35:13 +0200
+
+omr-vps-admin (0.9+20240322) unstable; urgency=medium
+
+    * Fix OpenVPN stats
+    * Fix Shadowsocks Rust stats
+    * You can add notes in json to an existing user
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 22 Mar 2024 16:00:25 +0200
+
+omr-vps-admin (0.9+20240301) unstable; urgency=medium
+
+    * Add/Remove users via API without script restart
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 01 Mar 2024 15:32:17 +0200
+
+omr-vps-admin (0.9+20240222) unstable; urgency=medium
+
+    * Use fd00 instead of fe80 for 6in4
+    * Allow all users to set VPN IPs in config
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 22 Feb 2024 18:17:04 +0200
+
+omr-vps-admin (0.8+20240213) unstable; urgency=medium
+
+    * Fix Shadowsocks-go add user and XRay/V2Ray remove user
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 13 Feb 2024 15:02:13 +0200
+
+omr-vps-admin (0.8+20240210) unstable; urgency=medium
+
+    * Fix typo
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sat, 10 Feb 2024 15:12:20 +0200
+
+omr-vps-admin (0.8+20240208) unstable; urgency=medium
+
+    * Add localvpn in API status answer, for future use"
+    * Fix OpenVPN config status
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 08 Feb 2024 10:30:14 +0200
+
+omr-vps-admin (0.8+20231228) unstable; urgency=medium
+
+    * Add function to get bypassed IPs from router
+    * Force 2022-blake3-aes-256-gcm for Shadowsocks-go
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 28 Dec 2023 19:48:29 +0200
+
+omr-vps-admin (0.7+20231215) unstable; urgency=medium
+
+    * Require authentication for upload and download test
+    * Crypt method can be modified for XRay Shadowsocks
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 15 Dec 2023 19:33:51 +0200
+
+omr-vps-admin (0.7+20231206) unstable; urgency=medium
+
+    * Fix adding OpenVPN user
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 03 Dec 2023 09:58:24 +0200
+
+omr-vps-admin (0.7+20231128) unstable; urgency=medium
+
+    * Fix global settings in json
+    * Fix when hostname website doesn't answer
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 28 Nov 2023 11:35:32 +0200
+
+omr-vps-admin (0.7+20231116) unstable; urgency=medium
+
+    * Fix ss_go stats when ss_go return a json with an error message
+    * Add OpenVPN stats by users support
+    * Add V2Ray VMess add users via API
+    * XRay Vless-Reality fix
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 16 Nov 2023 11:49:41 +0200
+
+omr-vps-admin (0.6+20231105) unstable; urgency=medium
+
+    * Really fix ss_go stats issue by returning a json instead of 0
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 05 Nov 2023 07:34:25 +0200
+
+omr-vps-admin (0.6+20231104) unstable; urgency=medium
+
+    * Should fix ss_go stats issue
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sat, 04 Nov 2023 20:22:34 +0200
+
+omr-vps-admin (0.6+20231102) unstable; urgency=medium
+
+    * Fix OpenVPN support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 02 Nov 2023 11:29:47 +0200
+
+omr-vps-admin (0.5+20231021) unstable; urgency=medium
+
+    * Remove pip from postinst
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 21 Oct 2023 23:53:14 +0200
+
+omr-vps-admin (0.5+20231017) unstable; urgency=medium
+
+    * Add XRay VLESS REALITY support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 17 Oct 2023 15:03:35 +0200
+
+omr-vps-admin (0.4+20231013) unstable; urgency=medium
+
+    * Fix error when API try to remove a Shadowsocks port that doesn't exist
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 13 Oct 2023 11:43:24 +0200
+
+omr-vps-admin (0.4+20231009) unstable; urgency=medium
+
+    * Add Shadowsocks-go traffic support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 09 Oct 2023 16:45:37 +0200
+
+omr-vps-admin (0.4+20231004) unstable; urgency=medium
+
+    * Fix Proxy configuration setting
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 04 Oct 2023 15:32:25 +0200
+
+omr-vps-admin (0.4+20230929) unstable; urgency=medium
+
+    * Fix XRay  traffic stats
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 29 Sep 2023 14:23:59 +0200
+
+omr-vps-admin (0.4+20230927) unstable; urgency=medium
+
+    * Add XRay support
+    * Add Shadowsocks-go support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 27 Sep 2023 15:08:39 +0200
+
+omr-vps-admin (0.3+20230911) unstable; urgency=medium
+
+    * Fix V2Ray traffic stats
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 11 Sep 2023 10:52:57 +0200
+
+omr-vps-admin (0.3+20230910) unstable; urgency=medium
+
+    * Remove dig requirement
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 10 Sep 2023 09:25:34 +0200
+
+omr-vps-admin (0.3+20230901) unstable; urgency=medium
+
+    * 10 router backups on VPS support, rotated
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 01 Sep 2023 09:12:36 +0200
+
+omr-vps-admin (0.3+20230828) unstable; urgency=medium
+
+    * Fix V2Ray stats
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 28 Aug 2023 10:15:54 +0200
+
+omr-vps-admin (0.3+20230825) unstable; urgency=medium
+
+    * Add V2Ray VMESS, SOCKS  and TROJAN protocols support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 25 Aug 2023 15:27:23 +0200
+
+omr-vps-admin (0.3+20230823) unstable; urgency=medium
+
+    * Fix in upload speedtest
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Wed, 23 Aug 2023 19:55:20 +0200
+
+omr-vps-admin (0.3+20230807) unstable; urgency=medium
+
+    * Replace regex by pattern
+    * Add upload speedtest
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 07 Aug 2023 19:17:52 +0200
+
+omr-vps-admin (0.3+20230724) unstable; urgency=medium
+
+    * Fix port redirection string to int
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 24 Jul 2023 09:24:34 +0200
+
+omr-vps-admin (0.3+20230718) unstable; urgency=medium
+
+    * Fix FastAPI version
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 17 Jul 2023 19:08:52 +0200
+
+omr-vps-admin (0.3+20230709) unstable; urgency=medium
+
+    * Remove IPv6 VPN IP check
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 09 Jul 2023 20:13:12 +0200
+
+omr-vps-admin (0.3+20230217) unstable; urgency=medium
+
+    * Fix Shadowsocks config on multiple IP
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 17 Feb 2023 16:36:22 +0200
+
+omr-vps-admin (0.3+20221001) unstable; urgency=medium
+
+    * Fix IPv6 firewall
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sat, 01 Oct 2022 07:26:42 +0200
+
+omr-vps-admin (0.3+20220827) unstable; urgency=medium
+
+    * Fix SIP ALG
+    * Add Wireguard client conf
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 27 Aug 2022 00:01:00 +0200
+
+omr-vps-admin (0.3+20220715) unstable; urgency=medium
+
+    * Fix line ending for MPTCP settings
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 15 Jui 2022 04:32:00 +0200
+
+omr-vps-admin (0.3+20220714) unstable; urgency=medium
+
+    * MPTCP version support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 14 Jui 2022 21:32:03 +0200
+
+omr-vps-admin (0.3+20220711) unstable; urgency=medium
+
+    * Add support to modify v2ray rules
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Mon, 11 Jui 2022 20:03:12 +0200
+
+omr-vps-admin (0.3+20220708) unstable; urgency=medium
+
+    * Fix v2ray remove rules
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Fri, 08 Jui 2022 20:09:47 +0200
+
+omr-vps-admin (0.3+20220612) unstable; urgency=medium
+
+    * Fix multiples FW rules
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sun, 12 Jun 2022 19:44:21 +0200
+
+omr-vps-admin (0.3+20220517) unstable; urgency=medium
+
+    * Add SIP ALG support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 17 May 2022 20:50:43 +0200
+
+omr-vps-admin (0.3+20210508) unstable; urgency=medium
+
+    * Fix update VPS
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Sat, 08 May 2021 08:40:13 +0200
+
+omr-vps-admin (0.3+20210414) unstable; urgency=medium
+
+    * Add check MPTCP support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 14 Apr 2021 21:10:30 +0200
+
+omr-vps-admin (0.3+20210408) unstable; urgency=medium
+
+    * Fix timing attack potential vulnerability
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 08 Apr 2021 20:57:20 +0200
+
+omr-vps-admin (0.3+20210325) unstable; urgency=medium
+
+    * Add MLVPN function to modify config
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 25 Mar 2021 09:27:20 +0200
+
+omr-vps-admin (0.3+20210315) unstable; urgency=medium
+
+    * Add MLVPN function to modify config
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 15 Mar 2021 15:10:52 +0200
+
+omr-vps-admin (0.3+20210304) unstable; urgency=medium
+
+    * Wireguard for MPTCP over VPN support
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 04 Mar 2021 14:36:12 +0200
+
+omr-vps-admin (0.2+20200611) unstable; urgency=medium
+
+    * Fix on VPN IPs settings
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Thu, 11 Jun 2020 20:27:08 +0200
+
+omr-vps-admin (0.1+20200608.git.e1e3bfa) unstable; urgency=medium
+
+    * initial package
+
+ -- OpenMPTCProuter <contact@openmptcprouter.com>  Tue, 8 Jun 2020 14:36:01 +0200

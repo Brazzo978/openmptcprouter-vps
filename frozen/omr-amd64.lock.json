@@ -1,0 +1,239 @@
+{
+  "architecture": "amd64",
+  "helpers": [
+    {
+      "file": "helpers/mptcp-scheduler-dscp.sh",
+      "sha256": "21a169d4553645db29bb8f506f89f9663592d8119ffcfe33e6abe832db023caa",
+      "size": 8679
+    },
+    {
+      "file": "helpers/mptcp-scheduler-weight.sh",
+      "sha256": "d1f4ad6e5e6ea96742a294835fcf8b01510a93b264811759838e1bb71f06a5cf",
+      "size": 8432
+    },
+    {
+      "file": "helpers/acme.sh",
+      "sha256": "c7d68b021cfd6380ea83a82962abde5b484779fee0b97d38681dfa1396bbc8d7",
+      "size": 294737,
+      "url": "https://raw.githubusercontent.com/acmesh-official/acme.sh/807da6498377ee5e0cf43a78091f46f12dc59a89/acme.sh"
+    }
+  ],
+  "mirror_base_url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/",
+  "mirror_verification": "All 21 HTTPS payloads checked from build host for status 200, size and SHA256 on 2026-10-13",
+  "packages": [
+    {
+      "architecture": "amd64",
+      "file": "libjson-c3_0.12.1+ds-2_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/j/json-c/libjson-c3_0.12.1+ds-2_amd64.deb",
+      "package": "libjson-c3",
+      "sha256": "5b0194dac67efa04ef6df15e3080bd53448b0209f6cf25ff6a46c6ba8dccc354",
+      "size": 26912,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/libjson-c3_0.12.1+ds-2_amd64.deb",
+      "version": "0.12.1+ds-2"
+    },
+    {
+      "architecture": "amd64",
+      "file": "libmqvpn0_0.16.2-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mqvpn/libmqvpn0_0.16.2-1_amd64.deb",
+      "package": "libmqvpn0",
+      "sha256": "0301baa7c4fa8b7733a24c5bcd0ae68781aac00f3ac7a7a7cda3f56668baec05",
+      "size": 138872,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/libmqvpn0_0.16.2-1_amd64.deb",
+      "version": "0.16.2-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-bkup_1.0-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mptcp-bpf-bkup/mptcp-bpf-bkup_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-bkup",
+      "sha256": "a292c259cc1f8e2552115e01bed23d72f39ce7d3390a54e35b2fd961be466bc8",
+      "size": 230476,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-bkup_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-burst_1.0-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mptcp-bpf-burst/mptcp-bpf-burst_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-burst",
+      "sha256": "4d719de6f1768303c748d05d13fe0702c1574293062daab29065473971962c41",
+      "size": 237024,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-burst_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-dscp_1.0-1_amd64.deb",
+      "origin_url": "https://www.openmptcprouter.com/debian/mptcp-bpf-dscp_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-dscp",
+      "sha256": "0465341754587c2de99224a979d50331105043b386ca64e99a7c3a8dfeab0573",
+      "size": 37216,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-dscp_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-first_1.0-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mptcp-bpf-first/mptcp-bpf-first_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-first",
+      "sha256": "43299c215e078dfbcb0126791de744e43538844300f650044168bf8e272c0cb8",
+      "size": 234144,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-first_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-red_1.0-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mptcp-bpf-red/mptcp-bpf-red_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-red",
+      "sha256": "71d761b3faf14fd5d947280f76a018c2af821311a4845137bc31c9c99d07867c",
+      "size": 229856,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-red_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-rr_1.0-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mptcp-bpf-rr/mptcp-bpf-rr_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-rr",
+      "sha256": "5ba74f731635ba58304d1579d3f8a599aab95e5f941224fcfacce6eaf8f18989",
+      "size": 230600,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-rr_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-weight_1.1-1_amd64.deb",
+      "origin_url": "https://www.openmptcprouter.com/debian/mptcp-bpf-weight_1.1-1_amd64.deb",
+      "package": "mptcp-bpf-weight",
+      "sha256": "eabf3ff904033e612319d42a7b8fec36f7a76b63dbe68b5be57c4d41723fdce6",
+      "size": 36164,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-weight_1.1-1_amd64.deb",
+      "version": "1.1-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mptcp-bpf-weight-rr_1.0-1_amd64.deb",
+      "origin_url": "https://www.openmptcprouter.com/debian/mptcp-bpf-weight-rr_1.0-1_amd64.deb",
+      "package": "mptcp-bpf-weight-rr",
+      "sha256": "a038a40ed2303e5396661160695c533265642d54c3f56992635783d740f375eb",
+      "size": 37214,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/mptcp-bpf-weight-rr_1.0-1_amd64.deb",
+      "version": "1.0-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "mqvpn_0.16.2-3k2_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/m/mqvpn/mqvpn_0.16.2-1_amd64.deb",
+      "package": "mqvpn",
+      "sha256": "6195f80b4ef2406c4df94ce7fb72ab4ae7b11206f0f6af631086d30f9a20f017",
+      "size": 1478424,
+      "url": "https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1163-3K/mqvpn_0.16.2-3k2_amd64.deb",
+      "version": "0.16.2-3k2"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-dsvpn_0.1.4-2_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-dsvpn/omr-dsvpn_0.1.4-2_amd64.deb",
+      "package": "omr-dsvpn",
+      "sha256": "1e89ece6b42368f5c7e399e61a82d4cd870c37b55856a6a5e0568a6fdb8d9d9c",
+      "size": 12072,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-dsvpn_0.1.4-2_amd64.deb",
+      "version": "0.1.4-2"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-glorytun_0.3.4-5_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-glorytun/omr-glorytun_0.3.4-5_amd64.deb",
+      "package": "omr-glorytun",
+      "sha256": "e5dafdb832fd5ed615b5f7b539b074bb21792ae92b6f70bb22ea9046b3dcde5a",
+      "size": 26968,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-glorytun_0.3.4-5_amd64.deb",
+      "version": "0.3.4-5"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-glorytun-tcp_0.0.35-6_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-glorytun-tcp/omr-glorytun-tcp_0.0.35-6_amd64.deb",
+      "package": "omr-glorytun-tcp",
+      "sha256": "3fc06efee83bd4398ca55b24c87b35ef0a7905fb7cc93dd7d438be783250810e",
+      "size": 16884,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-glorytun-tcp_0.0.35-6_amd64.deb",
+      "version": "0.0.35-6"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-mlvpn/omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "package": "omr-mlvpn",
+      "sha256": "0cdebbdb405fe154a9f661b1d236784190ffbdb69823d4fcb0333cedf7cd17e2",
+      "size": 49336,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-mlvpn_3.0.0+20211028.git.ddafba3_amd64.deb",
+      "version": "3.0.0+20211028.git.ddafba3"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-shadowsocks-libev_3.3.5-3_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-shadowsocks-libev/omr-shadowsocks-libev_3.3.5-3_amd64.deb",
+      "package": "omr-shadowsocks-libev",
+      "sha256": "7f6b07a64048cbd921a95353877d74ab8b649bc6e1fba4b7915beebb0fa8e856",
+      "size": 202884,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-shadowsocks-libev_3.3.5-3_amd64.deb",
+      "version": "3.3.5-3"
+    },
+    {
+      "architecture": "amd64",
+      "file": "omr-simple-obfs_0.0.5-1_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/o/omr-simple-obfs/omr-simple-obfs_0.0.5-1_amd64.deb",
+      "package": "omr-simple-obfs",
+      "sha256": "9e141398ae0a0cf08ead82dcaeff51d81268ce12f38018272d970d563a71d13b",
+      "size": 53978,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/omr-simple-obfs_0.0.5-1_amd64.deb",
+      "version": "0.0.5-1"
+    },
+    {
+      "architecture": "amd64",
+      "file": "shadowsocks-go_1.14.0_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/s/shadowsocks-go/shadowsocks-go_1.14.0_amd64.deb",
+      "package": "shadowsocks-go",
+      "sha256": "4464cddac16ea59d5df57214c8c6552549aaf5a8e771543622ea02d70f329c62",
+      "size": 2911488,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/shadowsocks-go_1.14.0_amd64.deb",
+      "version": "1.14.0"
+    },
+    {
+      "architecture": "amd64",
+      "file": "tracebox_0.4.4_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/t/tracebox/tracebox_0.4.4_amd64.deb",
+      "package": "tracebox",
+      "sha256": "9596c2c9ebd76c5d7c68c1bdf04b4487a5f20ba80f9a2e38fb5521c61ca26ec0",
+      "size": 221882,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/tracebox_0.4.4_amd64.deb",
+      "version": "0.4.4"
+    },
+    {
+      "architecture": "amd64",
+      "file": "v2ray_5.32.0_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/v/v2ray/v2ray_5.32.0_amd64.deb",
+      "package": "v2ray",
+      "sha256": "8c1984a5bbf2145e1e128831a96d96a72a6f6a85df96bf1f4fe2e61b99e4ded0",
+      "size": 9485320,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/v2ray_5.32.0_amd64.deb",
+      "version": "5.32.0"
+    },
+    {
+      "architecture": "amd64",
+      "file": "xray_26.7.11_amd64.deb",
+      "origin_url": "https://repo.openmptcprouter.com/pool/main/x/xray/xray_26.7.11_amd64.deb",
+      "package": "xray",
+      "sha256": "b786f68476a555ecf1f80fd7b83d65b04c9b95ddbb4cc96296c8b7c180e1dddd",
+      "size": 10189184,
+      "url": "https://repoomr.3klab.com/frozen3k/v0.64.2-20261013/vps-assets/xray_26.7.11_amd64.deb",
+      "version": "26.7.11"
+    }
+  ],
+  "schema": 1,
+  "scope": "OMR packages only; Debian 13 OS/security dependencies intentionally remain distribution-managed",
+  "source_feed_commit": "818fa5116eefc99325e0f231e819dc51b062ef85",
+  "source_index": "https://repo.openmptcprouter.com/dists/buster/main/binary-amd64/Packages.gz"
+}

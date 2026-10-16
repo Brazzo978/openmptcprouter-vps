@@ -1,0 +1,21 @@
+{
+    "port": 65500,
+    "users": [
+        {
+            "admin": {
+                "username": "admin",
+                "user_password": "AdminMySecretKey",
+                "permissions": "admin",
+                "disabled": false
+            },
+            "openmptcprouter": {
+                "userid": 0,
+                "username": "openmptcprouter",
+                "user_password": "MySecretKey",
+                "shadowsocks_port": 65101,
+                "disabled": false
+            }
+        }
+    ],
+    "debug": false
+}

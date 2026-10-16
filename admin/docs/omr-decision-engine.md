@@ -1,0 +1,724 @@
+# OpenMPTCProuter — Decision Engine
+
+`omr_metrics.py` exposes a PyTorch-based decision engine that assigns a routing
+weight to each WAN interface for use with `ip route … nexthop … weight N`.
+Higher weight = more traffic sent through that gateway.
+
+---
+
+## Pipeline overview
+
+```
+Interface metrics (JSON)
+        │
+        ▼
+  [optional] Predictive extrapolation   MLP (torch) or linear regression → future snapshot
+        │   (predict=true)
+        ▼
+  Feature extraction          21 floats in [0, 1], higher = better
+        │                     includes trend features and predicted congestion
+        ▼
+  InterfaceScorer (MLP)       Linear(21→32)→ReLU→Dropout→Linear(32→16)→ReLU→Dropout→Linear(16→1)
+        │
+        ▼
+  Offline masking             offline interface → softmax input forced to −∞
+        │
+        ▼
+  Softmax                     proportional values that sum to 1.0
+        │
+        ▼
+  Cost scaling                multiply each weight by 1/cost, renormalise
+        │
+        ▼
+  EMA smoothing               blend(0.3 × new + 0.7 × previous) per interface
+        │                     (offline interfaces bypass EMA — immediate reaction)
+        ├─► score  = softmax_scaled × 100   (quality %, 0–100, higher = better)
+        │
+        └─► weight = max(1, round(ema_smoothed × 255))   (ip route weight, 1–255)
+```
+
+In addition to this base per-interface weight, `?dscp=true` scores every
+interface against a table of standard DSCP traffic classes (voice, video,
+bulk, …) and returns a routing recommendation per class — see
+[§7 DSCP traffic-class routing](#7-dscp-traffic-class-routing).
+
+---
+
+## 1. Feature extraction
+
+Each interface payload is mapped to 21 normalised features.
+All values are clamped to their stated range before normalisation so one
+outlier cannot distort the others.
+
+### Static features (current snapshot)
+
+| # | Name | Formula | Missing default |
+|---|------|----------|-----------------|
+| 0 | `inv_latency` | `1 − clip(latency ms, 0, 500) / 500` | 0.5 |
+| 1 | `inv_loss` | `1 − clip(loss %, 0, 100) / 100` | 0.5 |
+| 2 | `inv_jitter` | `1 − clip(jitter ms, 0, 500) / 500` | 0.5 |
+| 3 | `inv_congestion` | `1 − clip(congestion.score, 0, 100) / 100` | 0.5 |
+| 4 | `rx_bps` | `clip(bandwidth.rx_bps, 0, 100 MB/s) / 100 MB/s` | 0.0 |
+| 5 | `tx_bps` | `clip(bandwidth.tx_bps, 0, 100 MB/s) / 100 MB/s` | 0.0 |
+| 6 | `signal` | `clip(signal.quality, 0, 100) / 100` | 0.5 |
+| 7 | `bbr_bw` | `clip(bbr.bw, 0, 100 MB/s) / 100 MB/s` | 0.0 |
+| 8 | `inv_ecn` | `1 − clip(tc.ecn_mark, 0, 1000) / 1000` | 1.0 |
+| 9 | `inv_dropped` | `1 − clip(tc.dropped, 0, 1000) / 1000` | 1.0 |
+| 10 | `inv_rtt_spread` | `1 − clip(rtt_max − rtt_min, 0, 500 ms) / 500` — buffer bloat | 0.5 |
+| 11 | `signal_rsrp` | `clip(rsrp + 140, 0, 80) / 80` — LTE RSRP (−140…−60 dBm) | 0.5 |
+| 12 | `signal_sinr` | `clip(sinr + 20, 0, 50) / 50` — LTE SINR (−20…30 dB) | 0.5 |
+| 13 | `inv_bbr_min_rtt` | `1 − clip(bbr.min_rtt ms, 0, 2000) / 2000` | 0.5 |
+| 14 | `inv_predicted_congestion` | worst of current and +5 min predicted congestion score | 0.5 |
+| 15 | `staleness` | `1 − clip(age of snapshot, 0, 300 s) / 300` — 1.0 = fresh, 0.0 = ≥5 min old | 0.5 |
+| 16 | `inv_latency_std` | `1 − clip(population std of latency over history, 0, 500 ms) / 500` | 0.5 |
+
+### Trend features (require InfluxDB history; neutral 0.5 when unavailable)
+
+| # | Name | Description |
+|---|------|-------------|
+| 17 | `trend_latency` | `>0.5` = improving (falling latency), `<0.5` = degrading |
+| 18 | `trend_loss` | `>0.5` = improving (falling loss) |
+| 19 | `trend_rx_bps` | `>0.5` = improving (rising throughput) |
+| 20 | `trend_jitter` | `>0.5` = improving (falling jitter) |
+
+`inv_*` features are inverted so that higher always means better.  Missing
+numeric fields use the default listed above (0.5 = neutral, 0.0 = worst, 1.0 = best).
+
+Trend slopes are computed with **exponential weighting** (half-life 300 s) so
+recent samples dominate over older ones.
+
+---
+
+## 2. Neural network (InterfaceScorer)
+
+```
+Input  (n_interfaces × 21)
+  └─ Linear(21 → 32) + ReLU + Dropout(0.1)
+       └─ Linear(32 → 16) + ReLU + Dropout(0.1)
+            └─ Linear(16 → 1)
+Output (n_interfaces,)  — unnormalised score per interface
+```
+
+Dropout(0.1) regularises against overfitting on sparse user feedback; it is
+disabled automatically during inference (`model.eval()`).
+
+The first hidden neuron is pre-seeded with importance priors so the untrained
+model already approximates sensible heuristic behaviour:
+
+| Feature | Prior importance |
+|---------|-----------------|
+| `inv_latency` | 4.0 (highest) |
+| `inv_loss` | 2.5 |
+| `trend_latency` | 2.0 |
+| `staleness` | 1.8 |
+| `inv_predicted_congestion` | 1.5 |
+| `inv_rtt_spread` | 1.5 |
+| `inv_jitter` | 1.5 |
+| `inv_congestion` | 1.2 |
+| `trend_loss` | 1.5 |
+| `rx_bps` / `tx_bps` | 1.0 each |
+| `inv_bbr_min_rtt` | 1.0 |
+| `inv_latency_std` | 1.0 |
+| `bbr_bw` | 0.8 |
+| `trend_rx_bps` / `trend_jitter` | 0.8 each |
+| `inv_ecn` / `inv_dropped` | 0.5 each |
+| `signal` | 0.5 |
+| `signal_rsrp` | 0.6 |
+| `signal_sinr` | 0.7 |
+
+The priors are L2-normalised and written into row 0 of the first weight matrix
+(`xavier_uniform_` fills the rest).
+
+The model is stored at `/etc/openmptcprouter-vps-admin/omr-decision-model.pt`
+and loaded at startup.  If the file is absent a fresh model with the priors
+above is initialised automatically.  If the saved model's input dimension does
+not match the current feature count (e.g. after a feature-set upgrade), the
+file is discarded and the model is reinitialised with a warning log.
+
+---
+
+## 3. Scoring and weight assignment
+
+1. **Run model** — all interfaces are scored in one forward pass (no grad).
+2. **Mask down interfaces** — an interface is treated as down (softmax input
+   forced to `−∞`, score → 0, weight → 1) when any of the following is true:
+   - `status` is set and is not `"online"` (e.g. `"ERROR"` = check failed)
+   - `latency` is `null` (ping check did not return a value = unreachable)
+3. **Softmax** — converts raw scores to proportional values that sum to 1.0.
+   Edge case: if *all* interfaces are offline every softmax output is `nan`
+   (0 ÷ 0); the engine falls back to equal proportions (1 / n each).
+4. **Cost scaling** — see [§4 Cost per interface](#4-cost-per-interface).
+5. **Score** — `score = round(scaled_weight × 100, 2)`.  A quality percentage
+   in [0, 100]; always non-negative.  Offline interface → score ≈ 0.
+6. **Weight** — `weight = max(1, round(scaled_weight × 255))`.  An integer in
+   [1, 255] ready to pass directly to `ip route … nexthop … weight N`.
+   The minimum of 1 ensures no interface is completely removed from routing.
+
+### Example
+
+Two interfaces, one with a good connection and one poor:
+
+| Interface | Softmax | Score (%) | ip route weight |
+|-----------|---------|-----------|-----------------|
+| eth0 | 0.82 | 82.0 | 209 |
+| wwan0 | 0.18 | 18.0 | 46 |
+
+All offline fallback (two interfaces): score 50.0 each, weight 128 each.
+
+---
+
+## 4. Cost per interface
+
+The `cost` field on an `InterfaceMetrics` payload applies a routing-cost
+penalty **after** softmax and **before** the final score/weight conversion.
+
+```
+factor(iface) = 1 / cost   (1.0 when cost is absent or zero)
+scaled(iface) = softmax(iface) × factor(iface)
+weight(iface) = max(1, round(normalise(scaled(iface)) × 255))
+```
+
+Because the scaled values are renormalised before conversion, only the
+*relative* cost between interfaces matters:
+
+| wan cost | wan2 cost | Effect |
+|----------|-----------|--------|
+| absent | absent | No change — standard softmax weights |
+| 10 | 10 | No change — equal penalty cancels out |
+| 10 | 100 | `wan` gets 10× more weight than `wan2` for identical quality |
+| 1 | 10 | `wan` gets 10× more weight than `wan2` |
+
+Cost is intentionally a post-model step so it acts as a hard operator
+preference on top of the learned quality signal.  It works identically in
+both the PyTorch path and the heuristic fallback.
+
+---
+
+## 5. EMA weight smoothing
+
+To prevent rapid oscillation when two interfaces have similar quality scores, the
+final weights are passed through an **Exponential Moving Average** (EMA) before
+being returned.
+
+```
+smoothed(iface) = 0.3 × new_weight + 0.7 × previous_smoothed
+```
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `EMA_ALPHA` | 0.3 | Blend fraction for the new observation |
+| Half-life | ~60–90 s | At 30 s polling intervals |
+
+The EMA state is kept per user in memory and reset on process restart.
+An interface that goes offline **bypasses** EMA entirely — its softmax input is
+forced to `−∞` so the weight drops to the minimum immediately without waiting
+for the moving average to decay.
+
+---
+
+## 6. Predictive congestion handling
+
+The engine has two complementary mechanisms for acting on congestion trends
+*before* they fully manifest.
+
+### 6a. `inv_predicted_congestion` feature (ML model)
+
+Feature #14 is the **worst of the current and +5 min predicted congestion
+score**, converted to `[0, 1]` (higher = less congestion).  When the current
+score is still low but rising fast, this feature already reflects the future
+degradation, causing the model to reduce the interface's weight preemptively.
+
+It requires at least 2 timestamped history points for the interface.  Without
+history it falls back to the current `congestion.score`.
+
+### 6b. Heuristic preemptive penalty
+
+The heuristic scorer (used when PyTorch is absent) now accepts history data
+and substitutes `max(current_congestion, predicted_congestion)` as the
+effective score.  This mirrors what the ML model does via the feature above.
+
+### 6c. `preemptive` query parameter
+
+Both scorers receive history data when `?preemptive=true` (the default) is
+passed to `GET /metrics/decision`.  The engine fetches the last hour of
+history per interface from InfluxDB and uses it for both predictive congestion
+and trend features.  This is a no-op with the JSON backend (no history).
+All-interface history queries are limited per interface in SQL before rows are
+returned, so large multi-router deployments do not fetch an unbounded history
+window only to trim it in Python.
+
+```
+GET /metrics/decision                    → preemptive on (default)
+GET /metrics/decision?preemptive=false   → current snapshot only, no history fetch
+```
+
+### 6d. Full payload extrapolation (`predict=true`)
+
+When `?predict=true` is passed, the engine replaces **all** metric fields with
+forward extrapolations before scoring (not just congestion).  This is the more
+aggressive mode: latency, loss, jitter, bandwidth, signal quality, and
+congestion are all projected to `now + horizon`.
+
+The following fields are extrapolated:
+
+| Field | Path |
+|-------|------|
+| Latency | `latency` |
+| Packet loss | `loss` |
+| Jitter | `jitter` |
+| Congestion score | `congestion.score` |
+| RX throughput | `bandwidth.rx_bps` |
+| TX throughput | `bandwidth.tx_bps` |
+| BBR bandwidth | `bbr.bw` |
+| Signal quality | `signal.quality` |
+
+Non-numeric and non-listed fields (status, device, IP…) are preserved from
+the latest snapshot.  If fewer than 2 timestamped points exist for an
+interface, its current snapshot is used unchanged.
+
+When PyTorch is installed and at least 5 timestamped history points are
+available for an interface, extrapolations use a small neural network
+(MLP: Linear(1→16)→Tanh→Linear(16→8)→Tanh→Linear(8→1)) trained online on the
+history window with exponential sample weighting (half-life per metric).
+This path can capture non-linear trends that linear regression misses.
+
+When PyTorch is absent, or for interfaces with fewer than 5 points, extrapolations
+fall back to **exponentially weighted linear regression** (half-life 300 s).
+
+All extrapolated values are clamped to physically valid ranges (e.g. loss stays
+in [0, 100]).
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `predict` | `false` | — | Enable full payload extrapolation |
+| `horizon` | `300` | 1–86400 | Seconds into the future to predict |
+
+---
+
+## 7. DSCP traffic-class routing
+
+`GET /metrics/decision?dscp=true` scores every WAN interface against a table
+of standard DSCP traffic classes (voice, video, bulk, …) in addition to the
+regular per-interface weight, and returns a routing recommendation per class —
+useful for policy routing / `tc filter` rules that steer marked traffic (e.g.
+VoIP tagged EF) to whichever WAN best suits that traffic type, independently
+of the single best-effort weight distribution.
+
+### 7a. Class profiles (`_DSCP_CLASSES`)
+
+Each class defines: the DSCP codepoint(s) it covers, a label, a set of
+feature importances (a subset of the §1 feature vector — no separate feature
+extraction), and its own forecast horizon.
+
+| Class | DSCP | Label | Priorities | Horizon |
+|-------|------|-------|-----------|---------|
+| `ef` | 46 | Voice (EF) | latency, jitter, loss, clean RTT | 20 s |
+| `cs5` | 40 | Video conferencing (CS5) | latency, jitter, loss, some bandwidth | 30 s |
+| `af41` | 34, 36, 38 | Streaming video (AF4x) | bandwidth, loss | 120 s |
+| `af31` | 26, 28, 30 | Broadcast video (AF3x) | bandwidth, loss, latency | 120 s |
+| `cs3` | 24 | Signaling (CS3) | latency, loss, congestion | 30 s |
+| `af21` | 18, 20, 22 | Low-latency data (AF2x) | latency, loss | 180 s |
+| `af11` | 10, 12, 14 | High-throughput data (AF1x) | bandwidth | 300 s |
+| `cs1` | 8 | Bulk / scavenger (CS1) | bandwidth only | 600 s |
+| `cs0` | 0 | Best effort (default) | balanced — same shape as the heuristic scorer | 300 s |
+| `cs6` | 48, 56 | Network control (CS6/CS7) | latency, loss, congestion | 20 s |
+
+Short horizons on real-time classes (voice, signaling, control) make them
+react to a spike seconds away; the long horizon on bulk/scavenger smooths
+over a longer trend instead of chasing noise.
+
+### 7b. Per-class scoring
+
+For each class and each online interface, `_dscp_class_weights`:
+
+1. **Forecasts** — with ≥ 2 history points, metrics are extrapolated the
+   class's own `horizon_s` seconds ahead (the same `_predict_payload`
+   machinery as §6d, just with a per-class horizon instead of the
+   request-level one) before feature extraction; otherwise the current
+   snapshot is used unchanged.
+2. **Formula score** — `raw = Σ (importance × feature)` over the class's
+   profile, using the same [0, 1] feature vectors as §1.
+3. **Cost scaling** — the same `1 / cost` penalty as the main decision (§4).
+4. **Model blend** — combined with the main decision's already-computed
+   probability distribution (the trained model's output, or the heuristic
+   scorer's when PyTorch is unavailable):
+
+   ```
+   blended(iface) = (1 − 0.3) × class_formula(iface) + 0.3 × model_prob(iface)
+   ```
+
+   `_DSCP_MODEL_BLEND = 0.3` (0 = ignore the model entirely, 1 = ignore the
+   class profile entirely). This lets DSCP scoring benefit from whatever the
+   model has learned globally while staying anchored to the class's own
+   priorities.
+5. **Weight** — the same `max(1, round(normalised × 255))` conversion as the
+   main decision, so each class's `weights` can be used directly.
+
+Offline interfaces (or missing `latency`) score 0 for every class, matching
+the masking rule in §3.
+
+### 7c. Response shape
+
+```jsonc
+{
+  "weights": { "eth0": 209, "wwan0": 46 },
+  "scores":  { "eth0": 82.0, "wwan0": 18.0 },
+  "dscp_classes": {
+    "ef": {
+      "dscp": [46], "label": "Voice (EF)", "horizon_s": 20,
+      "weights": { "eth0": 230, "wwan0": 25 },
+      "scores":  { "eth0": 90.2, "wwan0": 9.8 },
+      "best_interface": "eth0",
+      "ranking": ["eth0", "wwan0"]
+    },
+    "cs1": {
+      "dscp": [8], "label": "Bulk / scavenger (CS1)", "horizon_s": 600,
+      "weights": { "eth0": 90, "wwan0": 165 },
+      "scores":  { "eth0": 35.3, "wwan0": 64.7 },
+      "best_interface": "wwan0",
+      "ranking": ["wwan0", "eth0"]
+    }
+    // ... one entry per class in _DSCP_CLASSES
+  },
+  "dscp_by_interface": {
+    "eth0":  ["ef", "cs5", "cs3", "af21", "cs0", "cs6"],
+    "wwan0": ["af41", "af31", "af11", "cs1"]
+  }
+}
+```
+
+`dscp_by_interface` inverts `dscp_classes`, grouping classes by the
+interface that is their rank-1 (best) route.
+
+---
+
+## 8. Quality forecast endpoint
+
+`GET /metrics/quality/forecast` returns a combined quality forecast for every
+WAN interface covering four metrics: **congestion**, **loss**, **jitter**, and
+**RTT**, independent of the weight decision.
+
+### Forecast backend
+
+| Condition | Method |
+|-----------|--------|
+| PyTorch installed, ≥ 5 history points | MLP trained online on the history window (can capture curves) |
+| PyTorch installed, < 5 history points | Exponentially weighted linear regression (fallback) |
+| PyTorch not installed | Exponentially weighted linear regression |
+
+The MLP is a fresh 1→16→8→1 network trained for 100 Adam steps each call, with
+exponential sample weighting (half-life per metric) and L2 regularisation to
+prevent wild extrapolation.  Predictions from both methods are clamped to
+physically valid ranges and labelled with a `confidence` level.
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `horizon` | `300` | 30–3600 | Prediction horizon in seconds |
+| `since` | `1h` | — | History window: `15m` `30m` `1h` `6h` `12h` `24h` or seconds |
+| `limit` | `100` | 10–1000 | Maximum history points per interface |
+
+Each interface entry contains four sub-objects (`congestion`, `loss`, `jitter`,
+`rtt`), each with the same set of fields:
+
+| Field | Description |
+|-------|-------------|
+| `current` / `current_level` | Latest measured value and severity level |
+| `predicted` / `predicted_level` | Extrapolated value and level at +horizon seconds |
+| `trend` | `rising` \| `stable` \| `falling` |
+| `slope_per_min` | Change per minute in native units (positive = worsening) |
+| `eta_moderate_s` | Seconds to reach moderate severity; `null` if not trending there |
+| `eta_high_s` | Seconds to reach high severity; `null` if not trending there |
+| `eta_severe_s` | Seconds to reach severe; `null` if not trending there |
+| `confidence` | `high` (≥5 points, ≥2 min window) \| `medium` \| `low` \| `none` |
+
+Severity levels per metric:
+
+| Metric | none | low | moderate | high | severe |
+|--------|------|-----|----------|------|--------|
+| Congestion (score) | 0–24 | 25–49 | 50–74 | 75–89 | ≥90 |
+| Loss (%) | <0.1 | 0.1–1 | 1–5 | 5–15 | ≥15 |
+| Jitter (ms) | <5 | 5–10 | 10–30 | 30–60 | ≥60 |
+| RTT (ms) | <50 | 50–100 | 100–200 | 200–500 | ≥500 |
+
+Example response:
+
+```jsonc
+{
+  "wwan0": {
+    "congestion": {
+      "current": 28.0, "current_level": "low",
+      "predicted": 62.0, "predicted_level": "moderate",
+      "trend": "rising", "slope_per_min": 5.6,
+      "eta_moderate_s": 389, "eta_high_s": 836, "eta_severe_s": null,
+      "confidence": "high"
+    },
+    "loss": {
+      "current": 0.4, "current_level": "low",
+      "predicted": 0.6, "predicted_level": "low",
+      "trend": "stable", "slope_per_min": 0.02,
+      "eta_moderate_s": null, "eta_high_s": null, "eta_severe_s": null,
+      "confidence": "high"
+    },
+    "jitter": { ... },
+    "rtt":    { ... }
+  }
+}
+```
+
+With the JSON backend (no history), all ETAs are `null` and
+`confidence` is `"none"` for every metric.
+
+---
+
+## 9. Prometheus scrape endpoint
+
+`GET /metrics/prometheus` returns all users' latest WAN metrics in
+[Prometheus text format 0.0.4](https://prometheus.io/docs/instrumenting/exposition_formats/).
+Admin authentication is required (pass the bearer token in the `Authorization` header).
+
+Prometheus scrape config example:
+
+```yaml
+scrape_configs:
+  - job_name: openmptcprouter
+    scheme: https
+    authorization:
+      credentials: <admin-token>
+    static_configs:
+      - targets: ['your-vps:443']
+    metrics_path: /metrics/prometheus
+```
+
+Exposed metrics (all gauges, labelled `username` and `interface`):
+
+| Metric | Description |
+|--------|-------------|
+| `omr_interface_online` | 1 = online, 0 = offline/error |
+| `omr_latency_ms` | Latency in ms |
+| `omr_loss_percent` | Packet loss in % |
+| `omr_jitter_ms` | Jitter in ms |
+| `omr_rtt_min_ms` / `omr_rtt_max_ms` | Min/max RTT in ms |
+| `omr_rx_bps` / `omr_tx_bps` | Throughput in bytes/s |
+| `omr_congestion_score` | Congestion score 0–100 |
+| `omr_signal_quality` | Signal quality in % (cellular/wifi) |
+| `omr_bbr_bw_bps` | BBR bandwidth estimate in bytes/s |
+| `omr_data_age_seconds` | Age of the latest sample in seconds |
+| `omr_interface_anomaly{anomaly="..."}` | 1 when a latest-snapshot anomaly is present |
+
+Example output:
+
+```
+# HELP omr_interface_online 1 if the WAN interface is online 0 otherwise
+# TYPE omr_interface_online gauge
+omr_interface_online{username="alice",interface="wan"} 1
+omr_interface_online{username="alice",interface="wwan0"} 1
+# HELP omr_latency_ms WAN interface latency in milliseconds
+# TYPE omr_latency_ms gauge
+omr_latency_ms{username="alice",interface="wan"} 18.4
+omr_latency_ms{username="alice",interface="wwan0"} 42.1
+```
+
+Fields absent from a payload (e.g. `signal_quality` on a wired interface) are
+silently omitted — no `NaN` lines are emitted.
+
+---
+
+## 10. Online learning (fine-tuning)
+
+`POST /metrics/decision/train` runs one SGD step minimising the MSE between
+the model's current softmax output and a caller-supplied target distribution.
+
+```jsonc
+// Tell the engine that eth0 is the best interface
+{ "best_interface": "eth0", "learning_rate": 0.01 }
+
+// Or supply explicit target weights (they are L1-normalised internally)
+{ "weights": { "eth0": 0.7, "wwan0": 0.3 }, "learning_rate": 0.005 }
+```
+
+The model is saved to disk after every training step.  At least two interfaces
+must be present; the call is a no-op otherwise.
+
+### Automatic online learning (closed loop)
+
+Instead of waiting for explicit feedback, the engine can label interfaces
+itself from what actually happened on the links.  A background task wakes up
+every `interval` seconds and, for each user:
+
+1. Fetches the last `window` seconds of history per interface (InfluxDB).
+2. Computes an observed reward in `[0, 1]` per interface from
+   **load-independent** signals, so that steering traffic toward an interface
+   does not mechanically degrade its own reward:
+
+   ```
+   reward = availability × (0.40·loss_q + 0.35·rtt_q + 0.25·jitter_q)
+
+   availability = fraction of samples online and reachable
+   loss_q       = 1 − clip(mean loss %, 0, 20) / 20
+   rtt_q        = 1 − clip(mean bbr.min_rtt (fallback rtt_min, latency), 0, 500) / 500
+   jitter_q     = 1 − clip(mean jitter ms, 0, 100) / 100
+   ```
+
+3. Sharpens the rewards (`reward^sharpen`) into a target distribution and runs
+   one fine-tuning step (same KL/Adam path as manual training) at a small
+   learning rate.
+
+Interfaces with fewer than `min_points` samples are excluded from the round;
+a user needs at least two labelled interfaces to train.  A **watchdog** resets
+the model to its heuristic initialisation after 3 consecutive non-finite or
+divergent (> 5.0) losses.
+
+Before running a round, the loop also checks `/proc/meminfo`'s
+`MemAvailable`; if it is below `min_available_mb` the round is skipped
+entirely (no training pass is started, so no memory is allocated for it) —
+a guard against triggering PyTorch training on small/memory-constrained
+VPS instances. Re-checked every `interval`, so rounds resume automatically
+once memory frees up, with no restart needed.
+
+Optional **exploration**: with probability `exploration`, one
+`GET /metrics/decision` reply is perturbed by a log-normal factor
+(`exploration_scale` sigma) after EMA smoothing, so the model occasionally
+observes counterfactuals.  The perturbation is never fed back into the EMA
+state.
+
+**Enabled by default** (requires PyTorch **and** the InfluxDB backend — the
+loop silently idles otherwise).  Toggle it at runtime, persisted across
+restarts:
+
+```
+GET  /metrics/decision/auto                  → status (admin only)
+POST /metrics/decision/auto {"enabled": false}   disable
+POST /metrics/decision/auto {"enabled": true}    enable
+```
+
+Disabling leaves the background task idling (nothing is trained) so a later
+enable is instant.  Tuning (`omr-admin-config.json`, changes picked up within
+~60 s):
+
+```jsonc
+"auto_learning": {
+    "enabled": true,
+    "interval": 300,            // seconds between training rounds
+    "learning_rate": 0.0001,    // per-round Adam learning rate
+    "window": 900,              // reward window in seconds
+    "min_points": 5,            // samples required per interface
+    "sharpen": 4.0,             // reward^sharpen target contrast
+    "exploration": 0.0,         // probability of perturbing a decision
+    "exploration_scale": 0.15,  // log-normal sigma of the perturbation
+    "min_available_mb": 512     // skip the round if free RAM is below this
+}
+```
+
+Progress is reported by `GET /metrics/engine`: `auto_rounds`,
+`auto_train_count`, `auto_skipped`, `last_auto_round_at`, `last_auto_loss`,
+`auto_resets`, `exploration_count` in `runtime`, plus the resolved
+configuration and `task_running` flag in `auto_learning`.
+
+---
+
+## 11. API endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/metrics/prometheus` | admin | All users' WAN metrics in Prometheus text format |
+| `GET` | `/metrics/decision` | user | Current weights |
+| `GET` | `/metrics/decision?explain=true` | user | Weights + raw scores + per-feature breakdown |
+| `GET` | `/metrics/decision?predict=true` | user | Weights based on extrapolated future metrics |
+| `GET` | `/metrics/decision?predict=true&horizon=600` | user | Predict 10 minutes ahead |
+| `GET` | `/metrics/decision?preemptive=false` | user | Skip history fetch; current snapshot only |
+| `GET` | `/metrics/decision?dscp=true` | user | Adds `dscp_classes` + `dscp_by_interface` (§7) |
+| `GET` | `/metrics/decision?username=X` | admin | Decision for another user |
+| `GET` | `/metrics/quality/forecast` | user | Per-interface forecast: congestion, loss, jitter, RTT |
+| `GET` | `/metrics/quality/forecast?horizon=600&since=6h` | user | Longer window / horizon |
+| `GET` | `/metrics/user` | user | Metrics DB stats: entry count, first/last seen, interfaces |
+| `GET` | `/metrics/user?username=X` | admin | Stats for another user |
+| `POST` | `/metrics/decision/train` | user | Submit quality feedback |
+| `POST` | `/metrics/decision/reset` | admin | Reset model to heuristic init |
+| `GET` | `/metrics/decision/auto` | admin | Online auto-learning status |
+| `POST` | `/metrics/decision/auto` | admin | Enable/disable auto-learning (`{"enabled": bool}`) |
+
+### GET /metrics/decision
+
+```jsonc
+{
+  "weights": { "eth0": 209, "wwan0": 46 },
+  "scores":  { "eth0": 82.0, "wwan0": 18.0 },
+  "confidence": { "eth0": "high", "wwan0": "medium" },
+  "anomalies": { "eth0": [], "wwan0": ["rising_loss"] }
+}
+```
+
+`weights` are passed directly to `ip route … nexthop dev eth0 weight 209 nexthop dev wwan0 weight 46`.
+
+`scores` are quality percentages in [0, 100]; an offline interface scores ≈ 0.
+
+`confidence` describes data quality for the decision (`high`, `medium`, `low`,
+`none`) based on freshness, history depth, missing fields, and reachability.
+
+`anomalies` is a per-interface list of compact flags. Current-snapshot flags can
+include `offline`, `unreachable`, `stale_metrics`, `high_loss`, `high_jitter`,
+and `high_congestion`. When InfluxDB history is available, decision responses
+can also include `flapping`, `gateway_changed`, `rising_loss`, `rising_jitter`,
+and `rising_congestion`.
+
+### GET /metrics/decision?explain=true
+
+Adds a `"features"` block with the 21 normalised values used as model input:
+
+```jsonc
+{
+  "weights":  { "eth0": 209, "wwan0": 46 },
+  "scores":   { "eth0": 82.0, "wwan0": 18.0 },
+  "features": {
+    "eth0":  { "inv_latency": 0.95, "inv_loss": 1.0, "inv_predicted_congestion": 0.91, ... },
+    "wwan0": { "inv_latency": 0.61, "inv_loss": 0.87, "inv_predicted_congestion": 0.38, ... }
+  }
+}
+```
+
+### GET /metrics/decision?dscp=true
+
+Adds `"dscp_classes"` and `"dscp_by_interface"` — see
+[§7c Response shape](#7c-response-shape) for the full example.
+
+---
+
+## 12. Fallback behaviour
+
+| Condition | Behaviour |
+|-----------|-----------|
+| PyTorch not installed | Heuristic engine used (predicted congestion → latency → loss proxy) |
+| Model file missing | Fresh model initialised with heuristic priors |
+| Model file corrupt | Warning logged, fresh model used |
+| Model input size mismatch | Warning logged, fresh model used (feature set changed) |
+| No metrics stored for user | `GET /metrics/decision` returns `{}` |
+| All interfaces offline | Equal weights (128 each for 2 interfaces, min 1) |
+| EMA cold start (first call) | EMA initialised at current weights — no jump |
+| InfluxDB unavailable | Falls back to JSON file backend transparently |
+| `preemptive=true` with JSON backend | History fetch skipped; current snapshot only |
+| `predict=true` with JSON backend | Current snapshot used (no history available) |
+| `predict=true`, < 2 history points | Current snapshot used for that interface |
+| `quality/forecast` with JSON backend | `confidence: "none"`, ETAs all `null` for every metric |
+| `quality/forecast`, < 2 history points | `confidence: "none"` or `"low"` for that interface |
+| `quality/forecast`, PyTorch not installed | Linear regression used for all extrapolations |
+| `quality/forecast`, < 5 history points per interface | MLP path bypassed; linear regression used |
+| InfluxDB retention push fails | Retried with exponential backoff (5 attempts, absorbs InfluxDB 3 still starting up after boot); warning logged and installer-set retention remains as hard floor if all attempts fail |
+| `dscp=true`, < 2 history points for an interface | That interface's class forecast falls back to the current snapshot |
+| `dscp=true` with JSON backend / PyTorch not installed | Still works — class formula runs on current-snapshot features, blended with the heuristic scorer's probabilities |
+
+---
+
+## 13. InfluxDB configuration reference
+
+The `influxdb` block in `omr-admin-config.json` accepts:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `url` | — | InfluxDB 3 host URL (required to enable InfluxDB backend) |
+| `token` | — | Authentication token |
+| `org` | `"omr"` | Organisation (not used by InfluxDB 3 Core; kept for compatibility) |
+| `bucket` | `"omr_metrics"` | Database / bucket name |
+| `retention_days` | `60` | Data retention period pushed to InfluxDB at startup via `/api/v3/configure/database` |
+
+The latest-snapshot query window is fixed at **1 day** (much smaller than the
+retention period) to stay within InfluxDB 3 Core's Parquet file scan limits.

@@ -1,0 +1,7 @@
+[Unit]
+Description=Route remote WireGuard clients to the OMR router LAN
+After=network-online.target wg-quick@client-wg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wg-remote-lan-route
