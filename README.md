@@ -1,34 +1,33 @@
 # OpenMPTCProuter VPS 0.1163-3K
 
-Release stabile abbinata al [client v0.64.2-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.2-3K). Installazione su **Debian 13 amd64 con CPU x86-64-v3**, come root. Il comando scarica il bundle completo e ne verifica lo SHA-256 prima di eseguire l'installer:
+Stable release paired with [client v0.64.2-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.2-3K). Run as root on **Debian 13 amd64 with an x86-64-v3 CPU**. The command downloads the complete bundle and verifies its SHA-256 checksum before running the installer:
 
 ```sh
 workdir=$(mktemp -d) && wget -O "$workdir/vps.tar.gz" https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1163-3K/openmptcprouter-vps-0.1163-3K.tar.gz && echo "5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7  $workdir/vps.tar.gz" | sha256sum -c - && tar -xzf "$workdir/vps.tar.gz" -C "$workdir" && cd "$workdir/openmptcprouter-vps-0.1163-3K" && ./run-vps-3k.sh install
 ```
 
-L'installazione modifica rete, servizi e kernel. Le dipendenze Debian richiedono accesso APT. Al termine **riavviare la VPS** per usare il kernel incluso; SSH usa la porta **65222**. La configurazione generata per collegare il router è in `/root/openmptcprouter_config.txt`; il profilo per PC/telefono è in `/root/wireguard-client.conf`.
+Installation changes networking, services and the kernel. Debian dependencies require APT access. Once installation completes, **reboot the VPS** to use the included kernel; SSH uses port **65222**. The generated router connection settings are in `/root/openmptcprouter_config.txt`; the PC/phone WireGuard profile is in `/root/wireguard-client.conf`.
 
-## Funzioni
+## Features
 
-- Kernel e headers **6.18.41-20261013.x64v3-omr-3k**, congelati nella release; **BBRv3 (`bbr`) predefinito**, 18 congestion control e varianti NanBBR.
-- **21 pacchetti OMR congelati** e verificati con SHA-256. Kernel, pacchetti e API inclusi nel bundle; nessun download OMR necessario dai repository di Ysurac durante l'installazione verificata. Le dipendenze del sistema operativo provengono da Debian.
-- MQVPN nativo **0.16.2-3k2**, supporto FEC/XOR/RSC/PKM compilato e routing dei prefissi LAN. Il FEC a runtime resta configurabile.
-- IP del router primario **10.255.220.2** come default quando libero; configurazioni esplicite ed eventuali altri utenti preservati.
-- API **0.18+20261016-3k4**, log diagnostici autenticati e redatti, TCP reverse forwarding tramite XRay separato e tunnel MQVPN.
-- WireGuard remoto: accesso alla GUI OMR, LAN negata di default e abilitabile dalla checkbox del client o tramite helper/API VPS. Il full tunnel IPv4 `AllowedIPs = 0.0.0.0/0` può navigare con l'IP pubblico della VPS senza abilitare la LAN.
-- Rimosse le API e la funzione di backup del router sulla VPS; aggiornamenti automatici OMR bloccati per rispettare il congelamento della build.
+- Kernel and headers **6.18.41-20261013.x64v3-omr-3k**, pinned to this release; **BBRv3 (`bbr`) by default**, 18 congestion control algorithms and NanBBR variants.
+- **21 frozen OMR packages**, verified with SHA-256 checksums. The bundle includes the kernel, packages and API; the verified installation required no OMR downloads from Ysurac's repositories. Operating system dependencies come from Debian.
+- Native MQVPN **0.16.2-3k2**, with FEC/XOR/RSC/PKM support compiled in and LAN-prefix routing. Runtime FEC remains configurable.
+- Primary router IP **10.255.220.2** by default when available; explicit addresses and any other users are preserved.
+- API **0.18+20261016-3k4**, authenticated diagnostic logs with sensitive values redacted, and TCP reverse forwarding through the separate XRay backend and MQVPN tunnel.
+- Remote WireGuard access to the OMR GUI. LAN access is denied by default and can be enabled using the client checkbox or the VPS helper/API. An IPv4 full tunnel with `AllowedIPs = 0.0.0.0/0` can use the VPS public IP without enabling LAN access.
+- Router backups to the VPS and their API endpoints have been removed; automatic OMR updates are blocked to preserve the frozen build.
 
-## Verifiche
+## Validation
 
-Installazione da snapshot pulito Debian 13 conclusa con exit 0, riavvio nel kernel congelato e controllo di tutti i 21 pacchetti. **67 verifiche live superate**: 31 per installazione/API/servizi, 8 sul vero motore MQVPN con handshake e traffico verso una LAN di prova, 28 su WireGuard con HTTPS/DNS esterni, accesso GUI, blocco LAN, abilitazione esplicita e revoca anche di connessioni già aperte. Il report aggiunge un controllo sull'identità dell'archivio: **68 controlli complessivi**. Suite API: **1042 test superati, 9 saltati**.
+Installation from a clean Debian 13 snapshot completed with exit code 0, followed by a reboot into the frozen kernel and verification of all 21 packages. **67 live checks passed**: 31 installation/API/service checks, 8 checks using the actual MQVPN engine with a handshake and traffic to a test LAN, and 28 WireGuard checks covering external HTTPS/DNS, GUI access, LAN blocking, explicit access and revocation of established connections. The report adds archive identity verification, for **68 checks in total**. API suite: **1042 tests passed, 9 skipped**.
 
-SHA-256 del bundle effettivamente installato e pubblicato: `5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7`.
+SHA-256 of the exact bundle installed and published: `5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7`.
 
-Il collaudo WireGuard usa una GUI/LAN simulata; il routing nativo MQVPN è stato verificato separatamente con pacchetti reali. Il precedente client fisico fibra + 5G è stato cancellato dall'utente e non è stato riabbinato dopo l'installazione pulita. Le prove precedenti sul client reale e gli inoltri TCP sono documentate nella release client. Non è stato eseguito un benchmark controllato del throughput aggregato né dimostrata la stabilità XRay di lungo periodo.
+The WireGuard checks use simulated OMR GUI/LAN endpoints; native MQVPN routing was tested separately with actual packets. The previous physical fiber + 5G test client was deleted by the user and was not paired again after the clean installation. Earlier physical-client and TCP forwarding checks are documented in the client release. No controlled aggregated-throughput benchmark or long-term XRay stability proof is claimed.
 
-## Sorgenti e installazione
+## Source and installation
 
-Branch predefinito: [`omr-vps-0.1163-3K`](https://github.com/Brazzo978/openmptcprouter-vps/tree/omr-vps-0.1163-3K). Il tag `v0.1163-3K` identifica il codice del bundle verificato; il branch contiene anche queste istruzioni di installazione. Un semplice clone non include tutti i binari congelati: usare il comando sopra o il bundle completo della release.
+Default branch: [`omr-vps-0.1163-3K`](https://github.com/Brazzo978/openmptcprouter-vps/tree/omr-vps-0.1163-3K). The `v0.1163-3K` tag identifies the source code in the verified bundle; the branch also contains these installation instructions. A plain clone does not include all frozen binaries: use the command above or the complete release bundle.
 
-Per la procedura manuale e i dettagli WireGuard vedere [README-3K.md](https://github.com/Brazzo978/openmptcprouter-vps/blob/omr-vps-0.1163-3K/README-3K.md). Verificare gli altri asset con `SHA256SUMS-vps-0.1163-3K`.
-
+See [README-3K.md](https://github.com/Brazzo978/openmptcprouter-vps/blob/omr-vps-0.1163-3K/README-3K.md) for manual installation and WireGuard details. Verify the other assets with `SHA256SUMS-vps-0.1163-3K`.
