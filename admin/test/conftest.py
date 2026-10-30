@@ -406,6 +406,10 @@ def patch_env(request):
         patch("omr_admin.move"),
         patch("os.remove"),
         patch("subprocess.check_output", return_value=b""),
+        # Legacy route tests isolate their own effects. Profile-transaction
+        # tests opt out with real_env and exercise the real lock in tmp_path.
+        patch.object(omr_admin._profile_manager, 'guard_existing_mutation', side_effect=contextlib.nullcontext),
+        patch.object(omr_admin._profile_manager, 'locked', side_effect=contextlib.nullcontext),
         patch("subprocess.Popen", side_effect=_subprocess_popen_factory),
         patch("omr_admin.requests.get", side_effect=_requests_get_factory),
         patch("fastapi.routing.run_in_threadpool", side_effect=_run_in_threadpool_direct),

@@ -1,5 +1,10 @@
 omr-admin-config.json usr/share/omr-admin
 omr-admin-config.json etc/openmptcprouter-vps-admin
 omradmin.py usr/bin
+omr_profiles.py usr/share/omr-admin
+omr_profiles_watchdog.py usr/share/omr-admin
+debian/omr-profile-load-cc@.service lib/systemd/system
+debian/omr-profile-recovery.service lib/systemd/system
+debian/omr-profile-recovery.timer lib/systemd/system
 debian/omr-admin.service lib/systemd/system
 debian/omr-admin-resync.conf lib/systemd/system/nftables.service.d

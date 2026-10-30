@@ -1,0 +1,11 @@
+[Unit]
+Description=Check unconfirmed OMR profile settings
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=10s
+AccuracySec=1s
+Unit=omr-profile-recovery.service
+
+[Install]
+WantedBy=timers.target

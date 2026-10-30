@@ -1,0 +1,8 @@
+[Unit]
+Description=Recover unconfirmed OMR profile settings
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/share/omr-admin/omr_profiles_watchdog.py
+TimeoutStartSec=120

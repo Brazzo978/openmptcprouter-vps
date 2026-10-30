@@ -26,6 +26,7 @@ OMR_ADMIN_PASS=$(od -vN "32" -An -tx1 /dev/urandom | tr '[:lower:]' '[:upper:]' 
 systemctl daemon-reload
 systemctl enable omr-admin.service
 systemctl restart omr-admin.service
+systemctl enable --now omr-profile-recovery.timer
 
 
 db_stop

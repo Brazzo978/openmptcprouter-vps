@@ -32,7 +32,9 @@ import copy
 #from pprint import pprint
 from datetime import datetime, timedelta, timezone
 from tempfile import mkstemp
-from typing import List, Optional
+from typing import List, Optional, Literal
+from functools import wraps
+import omr_profiles
 from shutil import move
 from enum import Enum
 from os import path
@@ -58,7 +60,7 @@ from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
 from fastapi.openapi.utils import get_openapi
 from fastapi.openapi.models import SecurityBase as SecurityBaseModel
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, StrictBool, field_validator # pylint: disable=E0611
+from pydantic import BaseModel, StrictBool, Field, ConfigDict, field_validator # pylint: disable=E0611
 from starlette.status import HTTP_403_FORBIDDEN
 from starlette.responses import RedirectResponse, Response, JSONResponse, StreamingResponse
 #from starlette.requests import Request
@@ -2578,6 +2580,10 @@ async def _lifespan(app):
     load_mptcp_bpf_schedulers()
     normalize_persisted_mptcp_path_manager()
     sync_ss_go_users()
+    try:
+        _profile_manager.startup()
+    except Exception:
+        LOG.exception('Profile transaction recovery failed; profile mutations remain unavailable')
     # Optional omr_metrics module: start the background auto-learning loop
     # (no-op unless enabled in config with PyTorch + InfluxDB available).
     try:
@@ -2594,6 +2600,34 @@ async def _lifespan(app):
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, title="OpenMPTCProuter Server API", lifespan=_lifespan)
+
+# Profile journal contains only managed tuning values and survives API restarts.
+# Lambdas resolve existing helpers after this module has finished loading.
+def _profile_ensure_nanbbr(cc):
+    return omr_profiles.ensure_system_nanbbr(cc)
+
+_profile_manager = omr_profiles.ProfileManager(omr_profiles.Runtime(
+    lambda cmd: mqvpn_api(cmd), _profile_ensure_nanbbr,
+    lambda: read_nanbbr_aggressiveness()))
+
+def _profile_guard(func):
+    @wraps(func)
+    def guarded(*args, **kwargs):
+        try:
+            with _profile_manager.guard_existing_mutation():
+                return func(*args, **kwargs)
+        except omr_profiles.ProfileError as error:
+            raise HTTPException(status_code=error.status, detail=error.detail) from error
+    return guarded
+
+def _profile_serialize(func):
+    @wraps(func)
+    def guarded(*args, **kwargs):
+        # These endpoints change other parts of server.json; serialize their
+        # read-modify-write but permit them while a profile waits for approval.
+        with _profile_manager.locked():
+            return func(*args, **kwargs)
+    return guarded
 
 
 def sync_ss_go_users():
@@ -4561,6 +4595,7 @@ class MPTCPparams(BaseModel):
         return v
 
 @app.post('/mptcp', summary="Modify MPTCP configuration of the server")
+@_profile_guard
 def mptcp(*, params: MPTCPparams, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         #set_lastchange(10)
@@ -5522,6 +5557,7 @@ class MQVPN(BaseModel):
     reorder_rules: Optional[List[MQVPNReorderRule]] = None
 
 @app.post('/mqvpn', summary="Modify MQVPN configuration")
+@_profile_guard
 def mqvpn_set_config(*, params: MQVPN, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         return {'result': 'permission', 'reason': 'Read only user', 'route': 'mqvpn'}
@@ -5558,12 +5594,92 @@ def mqvpn_set_config(*, params: MQVPN, current_user: User = Depends(get_current_
         #set_lastchange()
     return {'result': 'done', 'reason': 'changes applied', 'route': 'mqvpn'}
 
+# Safe profile operations: never accept or return keys, addresses or users.
+class _StrictProfileModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+class ProfileMPTCP(_StrictProfileModel):
+    scheduler: str = Field(min_length=1, max_length=40, pattern=r'^[a-z0-9_]+$')
+    congestion_control: str = Field(min_length=1, max_length=40, pattern=r'^[a-z0-9_]+$')
+    nanbbr_aggressiveness: Optional[int] = Field(default=None, strict=True, ge=1, le=100)
+
+class ProfileReorder(_StrictProfileModel):
+    enabled: Optional[Literal['on', 'off', 'auto']] = None
+    max_wait_ms: Optional[int] = Field(default=None, strict=True, ge=0, le=60000)
+    cap_packets: Optional[int] = Field(default=None, strict=True, ge=1, le=1048576)
+
+    @field_validator('cap_packets')
+    @classmethod
+    def power_of_two(cls, value):
+        if value is not None and value & (value - 1):
+            raise ValueError('cap_packets must be a power of two')
+        return value
+
+class ProfileMQVPN(_StrictProfileModel):
+    scheduler: str = Field(min_length=1, max_length=40, pattern=r'^[a-z0-9_]+$')
+    cc: str = Field(min_length=1, max_length=40, pattern=r'^[a-z0-9_]+$')
+    fec_enable: Optional[StrictBool] = None
+    fec_scheme: Optional[Literal['xor', 'reed_solomon', 'packet_mask', 'galois_calculation']] = None
+    reinjection_control: Optional[StrictBool] = None
+    reinjection_mode: Optional[Literal['default', 'deadline', 'dgram']] = None
+    reorder: Optional[ProfileReorder] = None
+
+class ProfileAction(_StrictProfileModel):
+    transaction: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+class ProfileApply(ProfileAction):
+    mptcp: ProfileMPTCP
+    mqvpn: ProfileMQVPN
+
+def _profile_authorize(user):
+    if (user.userid not in (0, None) or
+        (user.userid is None and user.permissions != 'admin') or
+        user.permissions not in ('rw', 'admin')):
+        raise HTTPException(status_code=403, detail='Only the primary writable user may change profiles')
+
+def _profile_call(func, *args):
+    try:
+        return func(*args)
+    except omr_profiles.ProfileError as error:
+        raise HTTPException(status_code=error.status, detail=error.detail) from error
+    except Exception as error:
+        LOG.exception('Profile transaction failed')
+        raise HTTPException(status_code=503, detail='Profile transaction unavailable') from error
+
+@app.get('/profiles/capabilities', summary='Get safe profile values and capabilities')
+def profile_capabilities(current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    return _profile_call(_profile_manager.capabilities)
+
+@app.get('/profiles/status', summary='Get a profile transaction state')
+def profile_status(transaction: str = Query(..., pattern=r'^[0-9a-f]{32}$'),
+                   current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    return _profile_call(_profile_manager.status, transaction)
+
+@app.post('/profiles/apply', summary='Apply a guarded profile transaction')
+def profile_apply(*, params: ProfileApply, current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    requested = params.model_dump(exclude={'transaction'}, exclude_none=True)
+    return _profile_call(_profile_manager.apply, params.transaction, requested)
+
+@app.post('/profiles/confirm', summary='Confirm a pending profile transaction')
+def profile_confirm(*, params: ProfileAction, current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    return _profile_call(_profile_manager.finish, params.transaction, True)
+
+@app.post('/profiles/rollback', summary='Restore the previous profile values')
+def profile_rollback(*, params: ProfileAction, current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    return _profile_call(_profile_manager.finish, params.transaction, False)
+
 # Set MQVPN per-user config (fixed IP)
 class MQVPNUser(BaseModel):
     username: str
     fixed_ip: Optional[str] = None
 
 @app.post('/mqvpn_user', summary="Set or clear a fixed IP for an MQVPN user")
+@_profile_serialize
 def mqvpn_user_set_config(*, params: MQVPNUser, current_user: User = Depends(get_current_user)):
     if current_user.permissions not in ("admin",):
         return {'result': 'permission', 'reason': 'Admin only', 'route': 'mqvpn_user'}
@@ -5717,6 +5833,7 @@ class MQVPNDscpParams(BaseModel):
     pins: List[MQVPNDscpPin] = []
 
 @app.post('/mqvpn_dscp', summary="Sync router per-WAN DSCP class assignments into MQVPN's per-path dscp_mask (live + persisted)")
+@_profile_serialize
 def mqvpn_dscp(*, params: MQVPNDscpParams, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         return {'result': 'permission', 'reason': 'Read only user', 'route': 'mqvpn_dscp'}
@@ -5764,6 +5881,7 @@ class MQVPNWeightParams(BaseModel):
     weights: List[MQVPNWeightPin] = []
 
 @app.post('/mqvpn_weight', summary="Sync router per-WAN weights into MQVPN's per-path weight (live + persisted)")
+@_profile_serialize
 def mqvpn_weight(*, params: MQVPNWeightParams, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         return {'result': 'permission', 'reason': 'Read only user', 'route': 'mqvpn_weight'}
@@ -6215,6 +6333,7 @@ class NewUser(BaseModel):
     softethervpn_pass: Optional[str] = Query(None, title="SoftEther VPN password")
 
 @app.post('/add_user', summary="Add a new user")
+@_profile_serialize
 def add_user(*, params: NewUser, current_user: User = Depends(get_current_user), request: Request):
     if not current_user.permissions == "admin":
         return {'result': 'permission', 'reason': 'Need admin user', 'route': 'add_user'}
@@ -6361,6 +6480,7 @@ class RemoveUser(BaseModel):
     username: str = Query(..., pattern=USERNAME_PATTERN)
 
 @app.post('/remove_user', summary="Remove an user")
+@_profile_serialize
 def remove_user(*, params: RemoveUser, current_user: User = Depends(get_current_user), request: Request):
     if not current_user.permissions == "admin":
         return {'result': 'permission', 'reason': 'Need admin user', 'route': 'remove_user'}
@@ -6444,6 +6564,7 @@ class ModifyUser(BaseModel):
     proxy: Optional[PROXY] = Query(None, title="Proxy for the user")
 
 @app.post('/modify_user', summary="Modify an existing user")
+@_profile_serialize
 def modify_user(*, params: ModifyUser, current_user: User = Depends(get_current_user), request: Request):
     if not current_user.permissions == "admin":
         return {'result': 'permission', 'reason': 'Need admin user', 'route': 'modify_user'}
