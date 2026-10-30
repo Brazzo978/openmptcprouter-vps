@@ -28,6 +28,10 @@ The WireGuard LAN gate is independent of native MQVPN LAN route registration. Di
 
 ## Remote WireGuard access
 
+The next development build adds a multi-client manager; its behavior and test
+scope are documented in [WIREGUARD-REMOTE-MANAGER.md](docs/WIREGUARD-REMOTE-MANAGER.md).
+It is not part of the published 0.1163-3K archive described above.
+
 The generated /root/wireguard-client.conf starts with AllowedIPs = 10.255.0.0/16. Once OMR is paired, the VPS permits only the router GUI on its tunnel IPv4 address, TCP ports 80 and 443. Access to LAN devices is denied on the VPS, even if a client selects AllowedIPs = 0.0.0.0/0.
 
 For IPv4 Internet through the VPS, change the client's AllowedIPs to 0.0.0.0/0 and use a public DNS server, for example 1.1.1.1. The VPS forwards and NATs this traffic to its WAN public IPv4 address. This does not enable OMR LAN access.

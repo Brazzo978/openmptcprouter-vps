@@ -61,6 +61,10 @@ table inet omr {
 	# Populated by wg-remote-lan-route; both sets start empty after reload.
 	set wg_remote_gui_v4 { type ipv4_addr; }
 	set wg_remote_lan_v4 { type ipv4_addr; flags interval; }
+	# An empty LAN peer set denies everyone until the per-peer registry has
+	# been reconciled. VPS INPUT also starts restricted for the entire pool.
+	set wg_remote_peer_lan_v4 { type ipv4_addr; flags interval; }
+	set wg_remote_peer_restrict_v4 { type ipv4_addr; flags interval; elements = { 10.255.246.0/24 } }
 	set wg_remote_nonpublic_v4 {
 		type ipv4_addr; flags interval;
 		elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
@@ -72,7 +76,7 @@ table inet omr {
 	chain wg_remote_access {
 		# Router GUI remains available for rescue management with LAN denied.
 		oifname $VPN_IFACES ip daddr @wg_remote_gui_v4 tcp dport { 80, 443 } accept
-		oifname $VPN_IFACES ip daddr @wg_remote_lan_v4 accept
+		oifname $VPN_IFACES ip saddr @wg_remote_peer_lan_v4 ip daddr @wg_remote_lan_v4 accept
 		# Full-tunnel private destinations must not escape through the WAN.
 		ip daddr @wg_remote_nonpublic_v4 reject with icmpx type port-unreachable
 		# No other OMR tunnel destination (including router SSH) is implicit.
@@ -86,7 +90,7 @@ table inet omr {
 		# must stop as soon as the persistent gate is revoked.
 		iifname $VPN_IFACES ip saddr @wg_remote_gui_v4 tcp sport { 80, 443 } ct state established accept
 		iifname $VPN_IFACES ip saddr @wg_remote_gui_v4 ct state related accept
-		iifname $VPN_IFACES ip saddr @wg_remote_lan_v4 accept
+		iifname $VPN_IFACES ip daddr @wg_remote_peer_lan_v4 ip saddr @wg_remote_lan_v4 accept
 		ip saddr @wg_remote_nonpublic_v4 reject with icmpx type port-unreachable
 		iifname $VPN_IFACES reject with icmpx type port-unreachable
 		iifname $NET_IFACE return
@@ -102,6 +106,12 @@ table inet omr {
 		type filter hook input priority filter; policy accept;
 
 		iifname "lo" accept
+		# New road-warrior peers have no implicit access to VPS management.
+		# Keep local DNS available if the client explicitly uses the VPS as DNS.
+		# This check precedes established-flow and SSH exceptions deliberately.
+		iifname $VPNCL_IFACES ip saddr @wg_remote_peer_restrict_v4 udp dport 53 accept
+		iifname $VPNCL_IFACES ip saddr @wg_remote_peer_restrict_v4 tcp dport 53 accept
+		iifname $VPNCL_IFACES ip saddr @wg_remote_peer_restrict_v4 reject with icmpx type port-unreachable
 		ct state established,related accept
 		ct state invalid drop                                  # shorewall/rules: Invalid(DROP) net all tcp
 
@@ -159,6 +169,10 @@ table inet omr {
 		oifname $VPN_IFACES accept                              # policy: fw vpn ACCEPT (also covers shorewall/rules DNS(ACCEPT)/DHCPfwd(ACCEPT) $FW->vpn, both already implied by this policy row)
 		oifname $NET_IFACE accept                               # policy: fw net ACCEPT (also covers DNS(ACCEPT) $FW net)
 		meta nfproto ipv6 accept                                # shorewall6/policy: fw all ACCEPT
+		# Permit replies from an explicitly configured local DNS server to
+		# road-warrior clients; public DNS uses the existing forward path.
+		oifname $VPNCL_IFACES ip daddr 10.255.246.0/24 udp sport 53 ct state established,related accept
+		oifname $VPNCL_IFACES ip daddr 10.255.246.0/24 tcp sport 53 ct state established,related accept
 
 		# The only locally-generated traffic the source policy table really
 		# withholds is fw->vpncl (there is no such policy row, so it fell

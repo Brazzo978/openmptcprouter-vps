@@ -13,13 +13,22 @@ else
     exit 1
 fi
 python3 "$admin_builder" --output "$PWD/debian"
-export OMR_ADMIN_BINARY_VERSION=0.18+20261016-3k4
+export OMR_ADMIN_BINARY_VERSION=0.18+20261030-3k5
 export OMR_ADMIN_LOCAL_DEB="$PWD/debian/omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb"
+admin_metadata_version="$(python3 -c 'import json; print(json.load(open("debian/omr-vps-admin-3k.json"))["version"])')"
 export OMR_ADMIN_EXPECTED_SHA256="$(python3 -c 'import json; print(json.load(open("debian/omr-vps-admin-3k.json"))["sha256"])')"
 export LOCALFILES=yes
 export SOURCES=no
 export WIREGUARD=yes
-[ -f "$OMR_ADMIN_LOCAL_DEB" ] || exit 1
+if [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
+   [ "$admin_metadata_version" != "$OMR_ADMIN_BINARY_VERSION" ] ||
+   [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
+   [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
+   [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
+   [ "$(sha256sum "$OMR_ADMIN_LOCAL_DEB" | cut -d ' ' -f 1)" != "$OMR_ADMIN_EXPECTED_SHA256" ]; then
+    echo "Prepared 3K VPS API package or metadata failed verification" >&2
+    exit 1
+fi
 sh -n ./debian9-x86_64.sh
 if [ "$mode" = prepare ]; then
     echo "3K VPS API package prepared. Kernel pair must be built into cc/packages before install."

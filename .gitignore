@@ -5,5 +5,7 @@
 /debian/*.deb
 /debian/omr-vps-admin-3k.json
 /admin/__pycache__/
+/__pycache__/
+/tests/__pycache__/
 
 /frozen/assets/

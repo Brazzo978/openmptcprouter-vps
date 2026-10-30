@@ -266,15 +266,23 @@ def test_nft_sets_change_in_one_transaction(tmp_path, monkeypatch):
 
     def nft_run(command, **kwargs):
         commands.append((command, kwargs))
+        # This fixture represents an old live table without per-peer sets.
+        if command[:3] == ["nft", "list", "set"]:
+            return subprocess.CompletedProcess(command, 1)
+        if command[:4] == ["nft", "-j", "list", "table"]:
+            return subprocess.CompletedProcess(command, 0, json.dumps({"nftables": [
+                {"table": {"family": "inet", "name": "omr"}}]}))
+        return subprocess.CompletedProcess(command, 0)
     monkeypatch.setattr(helper.subprocess, "run", nft_run)
     remote = helper.ipaddress.IPv4Address("10.255.239.2")
     nets = [helper.ipaddress.IPv4Network("192.168.239.0/25"),
             helper.ipaddress.IPv4Network("192.168.239.128/25")]
     helper._real_sync_nft(remote, nets)
-    assert len(commands) == 1
-    assert commands[0][0] == ["nft", "-f", "-"]
-    assert commands[0][1]["check"] is True
-    assert commands[0][1]["input"].splitlines() == [
+    assert commands[0][0] == ["nft", "list", "set", "inet", "omr", "wg_remote_peer_lan_v4"]
+    transactions = [(command, opts) for command, opts in commands if command == ["nft", "-f", "-"]]
+    assert len(transactions) == 1
+    assert transactions[0][1]["check"] is True
+    assert transactions[0][1]["input"].splitlines() == [
         "flush set inet omr wg_remote_gui_v4",
         "flush set inet omr wg_remote_lan_v4",
         "add element inet omr wg_remote_gui_v4 { 10.255.239.2 }",

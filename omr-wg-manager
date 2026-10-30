@@ -1,0 +1,67 @@
+#!/bin/bash
+# Interactive and scriptable management of the existing OMR client-wg0 only.
+set -u
+umask 077
+helper=/usr/local/sbin/omr_wg_manager.py
+
+if [ "$EUID" -ne 0 ]; then
+    printf '%s\n' 'Run this command as root.' >&2
+    exit 1
+fi
+if [ ! -r "$helper" ]; then
+    printf '%s\n' 'The OMR WireGuard manager backend is missing.' >&2
+    exit 1
+fi
+if [ "$#" -gt 0 ]; then
+    exec python3 "$helper" "$@"
+fi
+
+while :; do
+    printf '\n%s\n' 'OpenMPTCProuter remote WireGuard clients'
+    printf '%s\n' \
+        '  1) Add a client' \
+        '  2) List clients, last handshake and traffic' \
+        '  3) Remove a client' \
+        '  4) Disable a client' \
+        '  5) Enable a client' \
+        '  6) Allow LAN access for a client' \
+        '  7) Deny LAN access for a client' \
+        '  8) Show a client profile' \
+        '  9) Show a client QR code' \
+        ' 10) Recover an interrupted peer operation' \
+        '  0) Exit'
+    read -r -p 'Select an option: ' choice || exit 0
+    case "$choice" in
+        1)
+            read -r -p 'Client name (letters, digits, _ or -): ' name || exit 0
+            read -r -p 'IPv4 address (empty chooses a free address): ' address || exit 0
+            read -r -p 'Route all IPv4 Internet through the VPS? [y/N]: ' full || exit 0
+            read -r -p 'VPS endpoint host:port (empty reuses the existing profile): ' endpoint || exit 0
+            args=(add "$name")
+            [ -z "$address" ] || args+=(--ip "$address")
+            case "$full" in y|Y|yes|YES) args+=(--full);; esac
+            [ -z "$endpoint" ] || args+=(--endpoint "$endpoint")
+            python3 "$helper" "${args[@]}" || true
+            ;;
+        2) python3 "$helper" status || true ;;
+        3)
+            read -r -p 'Client name to revoke: ' name || exit 0
+            read -r -p "Revoke $name? [y/N]: " confirm || exit 0
+            case "$confirm" in y|Y|yes|YES) python3 "$helper" remove "$name" || true;; esac
+            ;;
+        4|5|6|7|8|9)
+            read -r -p 'Client name: ' name || exit 0
+            case "$choice" in
+                4) python3 "$helper" disable "$name" || true ;;
+                5) python3 "$helper" enable "$name" || true ;;
+                6) python3 "$helper" lan "$name" allow || true ;;
+                7) python3 "$helper" lan "$name" deny || true ;;
+                8) python3 "$helper" show "$name" || true ;;
+                9) python3 "$helper" qr "$name" || true ;;
+            esac
+            ;;
+        10) python3 "$helper" recover || true ;;
+        0|q|Q) exit 0 ;;
+        *) printf '%s\n' 'Choose one of the listed options.' ;;
+    esac
+done

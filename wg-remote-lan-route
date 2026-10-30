@@ -24,6 +24,8 @@ STATE = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.enabled")
 LOCK = Path("/etc/openmptcprouter-vps-admin/wg-remote-lan-access.lock")
 NFT_RULESET = Path("/etc/nftables/omr.nft")
 MQVPN_CONFIG = Path("/etc/mqvpn/server.json")
+PEER_REGISTRY = Path("/etc/openmptcprouter-vps-admin/wg-remote-manager/peers.json")
+WG_CONFIG = Path("/etc/wireguard/client-wg0.conf")
 WG_INTERFACE = "client-wg0"
 TABLE = "24612"
 PRIORITY = "12460"
@@ -84,7 +86,47 @@ def nft_script(remote, networks):
 def sync_nft(remote, networks):
     # nft -f submits the flush/add commands as one transaction. A failure is
     # visible to the service and cannot leave one set updated without the other.
-    subprocess.run(["nft", "-f", "-"], input=nft_script(remote, networks),
+    script = nft_script(remote, networks)
+    # Support old rulesets during upgrades; with the new sets, absent/corrupt
+    # registry or WireGuard state always means no LAN grants and restricted VPS
+    # input for the whole client pool. The installed module contains no keys.
+    # The loaded kernel table is authoritative. During upgrades the disk file
+    # and the active rules may be from different versions in either direction.
+    # Old live tables have only the two original sets; new live tables also
+    # need the peer sets refreshed in the same transaction.
+    probe = subprocess.run(['nft', 'list', 'set', 'inet', 'omr', 'wg_remote_peer_lan_v4'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    peer_rules = probe.returncode == 0
+    if not peer_rules:
+        # A failed set query may mean either an old table or an inspection
+        # failure. Fall back only after the live table proves both sets absent.
+        table = subprocess.run(['nft', '-j', 'list', 'table', 'inet', 'omr'],
+                               text=True, capture_output=True, check=True)
+        document = json.loads(table.stdout)
+        objects = document.get('nftables')
+        if not isinstance(objects, list):
+            raise ValueError('Unable to inspect the live VPS firewall table')
+        live_tables = [entry.get('table') for entry in objects if isinstance(entry, dict) and 'table' in entry]
+        if not any(isinstance(t, dict) and t.get('family') == 'inet' and t.get('name') == 'omr'
+                   for t in live_tables):
+            raise ValueError('Live VPS firewall table is unavailable')
+        names = {entry['set'].get('name') for entry in objects if isinstance(entry, dict)
+                 and isinstance(entry.get('set'), dict)}
+        if names.intersection({'wg_remote_peer_lan_v4', 'wg_remote_peer_restrict_v4'}):
+            raise ValueError('Unable to inspect the live WireGuard peer firewall sets')
+    if peer_rules:
+        try:
+            from omr_wg_manager import peer_policy
+            grants, restricted = peer_policy(PEER_REGISTRY, WG_CONFIG)
+        except (ImportError, OSError, ValueError):
+            grants, restricted = [], ['10.255.246.0/24']
+        script += 'flush set inet omr wg_remote_peer_lan_v4\n'
+        script += 'flush set inet omr wg_remote_peer_restrict_v4\n'
+        if grants:
+            script += 'add element inet omr wg_remote_peer_lan_v4 { ' + ', '.join(grants) + ' }\n'
+        if restricted:
+            script += 'add element inet omr wg_remote_peer_restrict_v4 { ' + ', '.join(restricted) + ' }\n'
+    subprocess.run(["nft", "-f", "-"], input=script,
                    text=True, check=True)
 
 
@@ -213,9 +255,11 @@ def reconcile(args, enabled):
         remote, networks = configured_lan(args.config) if args.config.exists() else (None, [])
     except (ValueError, TypeError, KeyError, AttributeError):
         # Malformed synchronized state must not retain a previously allowed LAN.
-        if not args.dry_run and NFT_RULESET.exists():
-            sync_nft(None, [])
-            clear_policy_routes()
+        if not args.dry_run:
+            try:
+                sync_nft(None, [])
+            finally:
+                clear_policy_routes()
         raise
     allowed_networks = []
     device = ""
@@ -238,11 +282,17 @@ def reconcile(args, enabled):
         if not allowed_networks:
             return 0
     elif not NFT_RULESET.exists():
-        # The timer may start before nftables during installation; an explicit
-        # allow cannot claim success without the firewall gate.
+        # The source file can disappear while its old rules remain live. Never
+        # confuse an absent file with an absent kernel firewall: revoke its LAN
+        # sets first, even when ordinary main-table routes still reach the LAN.
+        # If nft is unavailable or the live table cannot be inspected/updated,
+        # report an error rather than claiming the gate has been closed.
+        try:
+            sync_nft(remote, [])
+        finally:
+            clear_policy_routes()
         if args.lan_access == "allow":
             raise ValueError("VPS firewall ruleset is unavailable")
-        clear_policy_routes()
         if args.config.exists():
             sync_mqvpn_routes(args.config)
         return 0
@@ -310,8 +360,7 @@ def main():
             # a saved allow state. Keep the router GUI separate from LAN access.
             set_lan_access(False)
             try:
-                if NFT_RULESET.exists():
-                    sync_nft(None, [])
+                sync_nft(None, [])
             finally:
                 clear_policy_routes()
             raise

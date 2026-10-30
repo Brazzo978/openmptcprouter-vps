@@ -153,7 +153,7 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
         exit 1
     fi
     if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
-       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261016-3k4" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261030-3k5" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||
@@ -2087,9 +2087,16 @@ if [ "$WIREGUARD" = "yes" ]; then
 	# Forwarding to the router LAN uses a dedicated policy table and is refreshed
 	# after OMR has synced its LAN prefixes and established the VPN tunnel.
 	if [ "$LOCALFILES" = "yes" ]; then
-		for wg_file in wg-remote-lan-route wg-remote-lan-route.service.in wg-remote-lan-route.timer.in; do
+		for wg_file in wg-remote-lan-route wg-remote-lan-route.service.in wg-remote-lan-route.timer.in omr-wg-manager omr_wg_manager.py; do
 			[ -f "$DIR/$wg_file" ] || { echo "Missing local WireGuard helper: $DIR/$wg_file" >&2; exit 1; }
 		done
+		install -m 0755 "$DIR/omr-wg-manager" /usr/local/sbin/omr-wg-manager
+		install -m 0644 "$DIR/omr_wg_manager.py" /usr/local/sbin/omr_wg_manager.py
+		# Snapshot all existing /32 peer identities before installing the new
+		# firewall. Refuse unsafe/ambiguous migrations without changing them.
+		/usr/local/sbin/omr-wg-manager init --defer-firewall || {
+			echo "Unable to migrate existing WireGuard clients safely" >&2; exit 1;
+		}
 		install -m 0755 "$DIR/wg-remote-lan-route" /usr/local/sbin/wg-remote-lan-route
 		install -m 0644 "$DIR/wg-remote-lan-route.service.in" /etc/systemd/system/wg-remote-lan-route.service
 		install -m 0644 "$DIR/wg-remote-lan-route.timer.in" /etc/systemd/system/wg-remote-lan-route.timer
