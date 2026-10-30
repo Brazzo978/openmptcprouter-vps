@@ -46,7 +46,7 @@
   "passed": 41,
   "scope": "isolated WSL/Linux namespaces; simulated OMR router and public endpoint; no installer, reboot, real MQVPN or production host",
   "source_sha256": {
-    "debian9-x86_64.sh": "8dab702d71ca79ff681aa2d086050fa5ac5cf5b59422e3a145e9801b2c61343c",
+    "debian9-x86_64.sh": "91e7f978101a49c21cd5658db20e3f995ea89d816e8d93f751ca900a0cb5a8f7",
     "nftables/omr-vars.nft": "acb66c759f07284287b5b3704cdc4464bf8f2287f6bbfd202fc792f2fcd0147c",
     "nftables/omr.nft": "e24e3cb6bbc6ecc7b3127450b1d1104050053130a068646c49218e74716bf32d",
     "omr-wg-manager": "21986d0d37a58a47216accf5a7b1fa6e0c6ad868db62fced71e53ab13ceaf61f",
@@ -55,5 +55,5 @@
     "tests/test_omr_wg_manager.py": "6c55e0fbb7aae72eca7944c18e092f964b042158898544195d2db82f69295b43",
     "wg-remote-lan-route": "704e7db394bf86fa2c58be2ae5a73a095120bf36d51507ceb267caa48249aebe"
   },
-  "tested_at_utc": "2026-10-30T13:13:46+00:00"
+  "tested_at_utc": "2026-10-30T14:27:26+00:00"
 }

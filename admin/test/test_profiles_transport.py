@@ -13,6 +13,8 @@ pytestmark = pytest.mark.real_env
 TX = 'b' * 32
 OLD = {'transport':'glorytun_tcp', 'proxy':'none',
        'mptcp':{'scheduler':'bpf_red', 'congestion_control':'bbr'}}
+NO_TUNNEL = {'transport':'none', 'proxy':'shadowsocks-rust',
+             'mptcp':{'scheduler':'default', 'congestion_control':'bbr'}}
 
 
 @pytest.fixture
@@ -21,6 +23,7 @@ def lab(tmp_path, monkeypatch):
     config.write_text(json.dumps({'users':[{'openmptcprouter':{
         'userid':0, 'vpn':'mqvpn', 'proxy':'shadowsocks-rust', 'vpnremoteip':'10.255.220.2',
         'fw_ports':[{'name':'web','port':'8080','proto':'tcp','fwtype':'DNAT','family':4,'vpn':'default'}],
+        'shadowsocks-go':{'port':65280,'protocol':'2022-blake3-aes-256-gcm','password':'ss-private:ss-user-private'},
         'key':'primary-private'},
         'second':{'userid':7, 'vpn':'mqvpn', 'key':'other-private'}}],
         'private_global':'global-secret'}))
@@ -31,6 +34,10 @@ def lab(tmp_path, monkeypatch):
     proxy=tmp_path/'current-proxy';proxy.write_text('shadowsocks-rust\n')
     glory=tmp_path/'glory';glory.write_text('MPTCP=true\n')
     (tmp_path/'glory.key').write_text('glory-private')
+    ssusers=tmp_path/'ssusers.json';ssusers.write_text(json.dumps({'openmptcprouter':'ss-user-private'}))
+    ssgo=tmp_path/'ssgo.json';ssgo.write_text(json.dumps({'servers':[{'name':'ss-2022','uPSKStorePath':str(ssusers),
+        'protocol':'2022-blake3-aes-256-gcm','psk':'ss-private',
+        'tcpListeners':[{'network':'tcp','multipath':True,'address':':65280'}]}]}))
     sysconf=tmp_path/'sysctl';sysconf.write_text('net.mptcp.scheduler=default\nnet.ipv4.tcp_congestion_control=cubic\n')
     live={'net.mptcp.scheduler':'default','net.ipv4.tcp_congestion_control':'cubic',
           'net.ipv4.tcp_available_congestion_control':'cubic bbr'}
@@ -44,16 +51,18 @@ def lab(tmp_path, monkeypatch):
     service_calls=[]
     def run(args,**kwargs):
         service_calls.append(args)
-        return subprocess.CompletedProcess(args,0,'','')
+        return subprocess.CompletedProcess(args,0,'LISTEN configured' if args[0]=='ss' else '','')
     monkeypatch.setattr(p.subprocess,'run',run)
     def control(_):
         return {'ok':True,'version':'0.16.2','scheduler':json.loads(mq.read_text())['scheduler']}
     runtime=p.Runtime(control,lambda _:None,lambda:None,mq_config=str(mq),sysctl_file=str(sysconf),
         admin_config=str(config),vpn_file=str(vpn),proxy_file=str(proxy),glory_config=str(glory),
-        config_lock=str(tmp_path/'config.lock'))
+        config_lock=str(tmp_path/'config.lock'),ss_go_config=str(ssgo),ss_go_users=str(ssusers),
+        ss_libev_config=str(tmp_path/'libev.json'))
     runtime.availability=lambda:{'tcp_schedulers':['default','bpf_red'],'tcp_cc':['bbr','cubic'],
         'mq_schedulers':['wlb','minrtt'],'mq_cc':['bbr2'],'fec_schemes':[],
-        'transports':['mqvpn','glorytun_tcp'],'proxies':['none','shadowsocks-rust']}
+        'transports':['mqvpn','glorytun_tcp','none'],'proxies':['none','shadowsocks-rust'],
+        'tcp_proxies':['shadowsocks-rust']}
     runtime.ensure_recovery_ready=lambda _:None
     manager=p.ProfileManager(runtime,tmp_path/'journal',tmp_path/'profile.lock',enable_timer=False)
     return manager,runtime,live,service_calls
@@ -75,7 +84,7 @@ def test_glorytun_transaction_preserves_credentials_other_users_and_rolls_back(l
     assert Path(runtime.mq_config).read_bytes()==mq_before
     assert not any('mqvpn' in call for call in calls)
     journal=manager.journal.read_text()
-    for secret in ('primary-private','other-private','global-secret','glory-private','mq-secret'):
+    for secret in ('primary-private','other-private','global-secret','glory-private','mq-secret','ss-user-private'):
         assert secret not in journal
     assert manager.finish(TX,False)['state']=='rolled_back'
     assert json.loads(Path(runtime.admin_config).read_text())==before
@@ -92,6 +101,106 @@ def test_glorytun_does_not_depend_on_running_mqvpn(lab):
     assert manager.apply(TX,copy.deepcopy(OLD))['state']=='pending'
     assert manager.finish(TX,False)['state']=='rolled_back'
     assert not any('mqvpn' in call for call in calls)
+
+
+def test_no_tunnel_clears_target_without_mqvpn_and_rollback_restores_it(lab):
+    manager,runtime,live,calls=lab
+    before=json.loads(Path(runtime.admin_config).read_text())
+    Path(runtime.mq_config).unlink()
+    runtime.control_api=lambda _: (_ for _ in ()).throw(p.ProfileError(503,'MQVPN down'))
+    assert manager.apply(TX,copy.deepcopy(NO_TUNNEL))['state']=='pending'
+    with pytest.raises(p.ProfileError,match='route before confirming'):manager.finish(TX,True)
+    with pytest.raises(p.ProfileError,match='selected transport'):manager.route(TX,'10.255.220.2')
+    result=manager.route(TX,no_tunnel=True)
+    assert result['route_ready'] and result['no_tunnel']
+    assert manager.route(TX,no_tunnel=True)==result
+    assert manager.status(TX)['route_no_tunnel'] is True
+    assert runtime.current()['selection']['vpnremoteip'] is None
+    user=json.loads(Path(runtime.admin_config).read_text())['users'][0]['openmptcprouter']
+    assert user['vpn']=='none' and user['proxy']=='shadowsocks-rust' and 'vpnremoteip' not in user
+    assert manager.finish(TX,False)['state']=='rolled_back'
+    assert json.loads(Path(runtime.admin_config).read_text())==before
+    assert not any('mqvpn' in call for call in calls)
+
+
+def test_no_tunnel_clear_rejects_wrong_transport_or_stopped_proxy(lab,monkeypatch):
+    manager,runtime,live,calls=lab
+    manager.apply(TX,copy.deepcopy(OLD))
+    with pytest.raises(p.ProfileError,match='selected transport'):manager.route(TX,no_tunnel=True)
+    manager.finish(TX,False)
+    manager.apply('c'*32,copy.deepcopy(NO_TUNNEL))
+    monkeypatch.setattr(runtime,'_proxy_active',lambda _:False)
+    with pytest.raises(p.ProfileError,match='service is not ready'):manager.route('c'*32,no_tunnel=True)
+    assert json.loads(Path(runtime.admin_config).read_text())['users'][0]['openmptcprouter']['vpnremoteip']=='10.255.220.2'
+
+
+@pytest.mark.parametrize('original',['absent','null'])
+def test_no_tunnel_interruption_recovers_and_preserves_previous_target_presence(lab,original):
+    manager,runtime,live,calls=lab
+    doc=json.loads(Path(runtime.admin_config).read_text())
+    if original=='absent':doc['users'][0]['openmptcprouter'].pop('vpnremoteip')
+    else:doc['users'][0]['openmptcprouter']['vpnremoteip']=None
+    Path(runtime.admin_config).write_text(json.dumps(doc))
+    manager.apply(TX,copy.deepcopy(NO_TUNNEL))
+    state=manager._load();state['route']={'state':'applying','no_tunnel':True}
+    state['before']['route_touched']=True;manager._write(state)
+    runtime.apply_route('none',None);manager.startup()
+    assert manager.status(TX)['state']=='rolled_back'
+    user=json.loads(Path(runtime.admin_config).read_text())['users'][0]['openmptcprouter']
+    assert ('vpnremoteip' in user)==(original=='null')
+    if original=='null':assert user['vpnremoteip'] is None
+
+
+def test_no_tunnel_capability_depends_on_active_proxy_not_mqvpn(lab,monkeypatch):
+    manager,runtime,live,calls=lab
+    runtime.control_api=lambda _: (_ for _ in ()).throw(p.ProfileError(503,'MQVPN down'))
+    monkeypatch.setattr(runtime,'_mq_attested',lambda:False)
+    monkeypatch.setattr(runtime,'_glory_ready',lambda:False)
+    runtime.availability=p.Runtime.availability.__get__(runtime,p.Runtime)
+    available=runtime.availability()
+    assert available['transports']==['none'] and 'shadowsocks-rust' in available['tcp_proxies']
+    assert available['mq_schedulers']==[] and not available['mq_running']
+    monkeypatch.setattr(runtime,'_tcp_listening',lambda _:False)
+    assert 'none' not in runtime.availability()['transports']
+
+
+@pytest.mark.parametrize('fault',['multipath','listen','protocol','credentials','service','socket','loopback','user_store'])
+def test_rust_alias_requires_compatible_active_mptcp_go_endpoint(lab,monkeypatch,fault):
+    manager,runtime,live,calls=lab
+    assert runtime._proxy_active('shadowsocks-rust')
+    config=json.loads(Path(runtime.ss_go_config).read_text())
+    listener=config['servers'][0]['tcpListeners'][0]
+    if fault=='multipath':listener['multipath']=False
+    if fault=='listen':listener['network']='udp'
+    if fault=='protocol':config['servers'][0]['protocol']='unsupported'
+    if fault=='user_store':config['servers'][0]['uPSKStorePath']='/tmp/other-users.json'
+    if fault=='credentials':Path(runtime.ss_go_users).write_text(json.dumps({'openmptcprouter':'mismatched'}))
+    if fault=='loopback':listener['address']='127.0.0.1:65280'
+    Path(runtime.ss_go_config).write_text(json.dumps(config))
+    if fault in ('service','socket'):
+        def run(args,**kwargs):
+            if fault=='service' and args[0]=='systemctl':return subprocess.CompletedProcess(args,3,'','')
+            if fault=='socket' and args[0]=='ss':return subprocess.CompletedProcess(args,0,'','')
+            return subprocess.CompletedProcess(args,0,'LISTEN configured','')
+        monkeypatch.setattr(p.subprocess,'run',run)
+    assert not runtime._proxy_active('shadowsocks-rust')
+
+
+def test_libev_is_advertised_as_its_own_proxy_not_rust_alias(lab,monkeypatch):
+    manager,runtime,live,calls=lab
+    Path(runtime.ss_go_config).unlink()
+    doc=json.loads(Path(runtime.admin_config).read_text())
+    doc['users'][0]['openmptcprouter']['shadowsocks_port']=65101
+    Path(runtime.admin_config).write_text(json.dumps(doc))
+    Path(runtime.ss_libev_config).write_text(json.dumps({'mptcp':True,'mode':'tcp_and_udp',
+                                                          'port_key':{'65101':'libev-private'}}))
+    runtime.availability=p.Runtime.availability.__get__(runtime,p.Runtime)
+    available=runtime.availability()
+    assert 'shadowsocks' in available['tcp_proxies'] and 'none' in available['transports']
+    assert 'shadowsocks-rust' not in available['tcp_proxies']
+    data=json.loads(Path(runtime.ss_libev_config).read_text());data['mptcp']=False
+    Path(runtime.ss_libev_config).write_text(json.dumps(data))
+    assert not runtime._proxy_active('shadowsocks')
 
 
 def test_stopped_mqvpn_is_started_for_profile_and_stopped_on_rollback(lab,monkeypatch):

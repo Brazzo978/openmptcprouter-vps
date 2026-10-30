@@ -153,7 +153,7 @@ if [ "$OMR_3K_FROZEN" = "yes" ]; then
         exit 1
     fi
     if [ -z "${OMR_ADMIN_LOCAL_DEB:-}" ] || [ ! -f "$OMR_ADMIN_LOCAL_DEB" ] ||
-       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261030-3k6" ] ||
+       [ "$OMR_ADMIN_BINARY_VERSION" != "0.18+20261030-3k7" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Package 2>/dev/null)" != "omr-vps-admin" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Version 2>/dev/null)" != "$OMR_ADMIN_BINARY_VERSION" ] ||
        [ "$(dpkg-deb -f "$OMR_ADMIN_LOCAL_DEB" Architecture 2>/dev/null)" != "all" ] ||

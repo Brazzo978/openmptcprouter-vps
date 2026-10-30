@@ -3790,6 +3790,7 @@ class ShadowsocksConfigparams(BaseModel):
     key: str
 
 @app.post('/shadowsocks', summary="Modify Shadowsocks-libev configuration")
+@_profile_guard
 def shadowsocks(*, params: ShadowsocksConfigparams, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         #set_lastchange(10)
@@ -3968,6 +3969,7 @@ class ShadowsocksGoConfigparams(BaseModel):
     #key: str
 
 @app.post('/shadowsocks-go', summary="Modify Shadowsocks-Go configuration")
+@_profile_guard
 def shadowsocks_go(*, params: ShadowsocksGoConfigparams, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         #set_lastchange(10)
@@ -5598,11 +5600,12 @@ class ProfileAction(_StrictProfileModel):
 class ProfileApply(ProfileAction):
     mptcp: ProfileMPTCP
     mqvpn: Optional[ProfileMQVPN] = None
-    transport: Optional[Literal['mqvpn', 'glorytun_tcp']] = None
+    transport: Optional[Literal['mqvpn', 'glorytun_tcp', 'none']] = None
     proxy: Optional[str] = Field(default=None, min_length=1, max_length=40, pattern=r'^[a-z0-9_-]+$')
 
 class ProfileRoute(ProfileAction):
-    vpnremoteip: str = Field(min_length=7, max_length=15, pattern=r'^[0-9.]+$')
+    vpnremoteip: Optional[str] = Field(default=None, min_length=7, max_length=15, pattern=r'^[0-9.]+$')
+    no_tunnel: Optional[StrictBool] = None
 
 def _profile_authorize(user):
     if (user.userid not in (0, None) or
@@ -5637,7 +5640,8 @@ def profile_apply(*, params: ProfileApply, current_user: User = Depends(get_curr
     requested = params.model_dump(exclude={'transaction'}, exclude_none=True)
     transport, proxy, mq = requested.get('transport'), requested.get('proxy'), requested.get('mqvpn')
     if (transport is None and (proxy is not None or mq is None) or
-            transport is not None and (proxy is None or (transport == 'mqvpn') != (mq is not None))):
+            transport is not None and (proxy is None or (transport == 'mqvpn') != (mq is not None)) or
+            transport == 'none' and proxy == 'none'):
         raise HTTPException(status_code=422, detail='Invalid profile transport and settings combination')
     return _profile_call(_profile_manager.apply, params.transaction, requested)
 
@@ -5649,7 +5653,11 @@ def profile_confirm(*, params: ProfileAction, current_user: User = Depends(get_c
 @app.post('/profiles/route', summary='Bind a pending profile to its verified router tunnel address')
 def profile_route(*, params: ProfileRoute, current_user: User = Depends(get_current_user)):
     _profile_authorize(current_user)
-    return _profile_call(_profile_manager.route, params.transaction, params.vpnremoteip)
+    fields = params.model_fields_set
+    if not ((params.no_tunnel is True and 'vpnremoteip' not in fields) or
+            (params.vpnremoteip is not None and 'no_tunnel' not in fields)):
+        raise HTTPException(status_code=422, detail='Specify a tunnel IPv4 address or no_tunnel=true')
+    return _profile_call(_profile_manager.route, params.transaction, params.vpnremoteip, params.no_tunnel is True)
 
 @app.post('/profiles/rollback', summary='Restore the previous profile values')
 def profile_rollback(*, params: ProfileAction, current_user: User = Depends(get_current_user)):

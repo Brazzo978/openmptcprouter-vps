@@ -105,6 +105,8 @@ def test_transport_schema_rejects_ambiguous_combinations(profile_manager,user_cl
         {'transport':'glorytun_tcp','mptcp':valid_mptcp},
         {'proxy':'none','mptcp':valid_mptcp,'mqvpn':REQ['mqvpn']},
         {'transport':'openvpn','proxy':'none','mptcp':valid_mptcp},
+        {'transport':'none','proxy':'none','mptcp':valid_mptcp},
+        {'transport':'none','proxy':'shadowsocks-rust','mptcp':valid_mptcp,'mqvpn':REQ['mqvpn']},
     ]
     for payload in invalid:
         assert user_client.post('/profiles/apply',json={'transaction':TX,**payload}).status_code==422
@@ -116,6 +118,10 @@ def test_legacy_selection_mutations_are_blocked_while_transaction_pending(profil
     assert user_client.post('/vpn',json={'vpn':'glorytun_tcp'}).status_code==409
     assert user_client.post('/proxy',json={'proxy':'none'}).status_code==409
     assert user_client.post('/vpnips',json={'remoteip':'10.255.255.2','localip':'10.255.255.1'}).status_code==409
+    assert user_client.post('/shadowsocks-go',json={'port':65280,'method':'2022-blake3-aes-256-gcm',
+        'fast_open':False,'reuse_port':False,'mptcp':True}).status_code==409
+    assert user_client.post('/shadowsocks',json={'port':65101,'method':'chacha20-ietf-poly1305',
+        'fast_open':False,'reuse_port':False,'no_delay':True,'mptcp':True,'key':'fixture'}).status_code==409
 
 
 def test_capability_version_negotiation_keeps_legacy_response(profile_manager,user_client):
@@ -148,3 +154,23 @@ def test_v2_route_is_required_before_confirm_and_is_idempotent(profile_manager,u
 def test_profile_route_requires_authentication(profile_manager,unauth_client):
     route={'transaction':TX,'vpnremoteip':'10.255.255.2'}
     assert unauth_client.post('/profiles/route',json=route).status_code in (401,403)
+
+
+def test_v2_no_tunnel_route_requires_unambiguous_explicit_clear(profile_manager,user_client):
+    mgr,runtime=profile_manager
+    runtime.apply=lambda target:None
+    changed=[];runtime.apply_route=lambda transport,ip:changed.append((transport,ip))
+    payload={'transaction':TX,'transport':'none','proxy':'shadowsocks-rust','mptcp':REQ['mptcp']}
+    assert user_client.post('/profiles/apply',json=payload).status_code==200
+    invalid=[{}, {'no_tunnel':False}, {'no_tunnel':'true'}, {'no_tunnel':True,'vpnremoteip':None},
+             {'no_tunnel':None,'vpnremoteip':'10.255.255.2'},
+             {'no_tunnel':True,'vpnremoteip':'10.255.255.2'}]
+    for item in invalid:
+        assert user_client.post('/profiles/route',json={'transaction':TX,**item}).status_code==422
+    assert user_client.post('/profiles/route',json={'transaction':TX,'vpnremoteip':'10.255.255.2'}).status_code==409
+    result=user_client.post('/profiles/route',json={'transaction':TX,'no_tunnel':True})
+    assert result.status_code==200 and result.json()['no_tunnel'] is True
+    status=user_client.get('/profiles/status',params={'transaction':TX}).json()
+    assert status['route_ready'] and status['route_no_tunnel'] is True
+    assert changed==[('none',None)]
+    assert user_client.post('/profiles/confirm',json={'transaction':TX}).json()['state']=='confirmed'

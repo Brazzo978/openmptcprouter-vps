@@ -42,7 +42,7 @@ MQ_DEFAULTS = {'scheduler': 'wlb', 'cc': 'bbr2', 'fec_enable': False,
                'reorder': {'enabled': 'off', 'max_wait_ms': 30, 'cap_packets': 1024}}
 MQ_FIELDS = frozenset(MQ_DEFAULTS) - {'reorder'}
 REORDER_FIELDS = frozenset(MQ_DEFAULTS['reorder'])
-TRANSPORTS = ('mqvpn', 'glorytun_tcp')
+TRANSPORTS = ('mqvpn', 'glorytun_tcp', 'none')
 PROXIES = ('none', 'v2ray', 'v2ray-vmess', 'v2ray-socks', 'v2ray-trojan',
            'v2ray-vless', 'xray', 'xray-vmess', 'xray-socks', 'xray-trojan',
            'xray-shadowsocks', 'xray-vless', 'xray-vless-reality',
@@ -276,7 +276,10 @@ class Runtime:
                  proxy_file='/etc/openmptcprouter-vps-admin/current-proxy',
                  glory_config='/etc/glorytun-tcp/tun0',
                  config_lock=CONFIG_LOCK, nft_bin='/usr/sbin/nft',
-                 wg_helper='/usr/local/sbin/wg-remote-lan-route'):
+                 wg_helper='/usr/local/sbin/wg-remote-lan-route',
+                 ss_go_config='/etc/shadowsocks-go/server.json',
+                 ss_go_users='/etc/shadowsocks-go/upsks.json',
+                 ss_libev_config='/etc/shadowsocks-libev/manager.json'):
         self.control_api = control_api
         self.ensure_nanbbr = ensure_nanbbr
         self.read_nanbbr = read_nanbbr
@@ -284,6 +287,7 @@ class Runtime:
         self.admin_config, self.vpn_file, self.proxy_file = admin_config, vpn_file, proxy_file
         self.glory_config, self.config_lock = glory_config, config_lock
         self.nft_bin, self.wg_helper = nft_bin, wg_helper
+        self.ss_go_config, self.ss_go_users, self.ss_libev_config = ss_go_config, ss_go_users, ss_libev_config
 
     def ensure_recovery_ready(self, requested=None):
         try:
@@ -331,18 +335,24 @@ class Runtime:
                 user = data['users'][0]['openmptcprouter']
                 if not isinstance(user, dict) or user.get('userid', 0) != 0:
                     raise ValueError('Primary OMR user is unavailable')
-                result = {name: user.get(name) for name in ('vpn', 'proxy')}
+                result = {name: user.get(name) for name in ('vpn', 'proxy', 'vpnremoteip')}
                 for name, filename in (('global_vpn', self.vpn_file), ('global_proxy', self.proxy_file)):
                     try: result[name] = Path(filename).read_text(encoding='utf-8').strip()
                     except FileNotFoundError: result[name] = None
+                remote = result.pop('vpnremoteip')
+                if remote is not None:
+                    if not isinstance(remote, str): raise ValueError('Invalid OMR remote address')
+                    remote = str(ipaddress.IPv4Address(remote))
                 for value in result.values():
                     if value is not None and (not isinstance(value, str) or not re.fullmatch(r'[a-z0-9_-]{1,40}', value)):
                         raise ValueError('Invalid OMR selection')
+                result['vpnremoteip'] = remote
                 return result
         except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError) as exc:
             if required:
                 raise ProfileError(409, 'Primary OMR VPN/proxy selection is unavailable') from exc
-            return {'vpn': None, 'proxy': None, 'global_vpn': None, 'global_proxy': None}
+            return {'vpn': None, 'proxy': None, 'global_vpn': None, 'global_proxy': None,
+                    'vpnremoteip': None}
 
     def _selection_snapshot(self):
         with configuration_lock(self.config_lock):
@@ -431,26 +441,101 @@ class Runtime:
         except (OSError, ValueError, TypeError, UnicodeError, KeyError) as exc:
             raise ProfileError(409, 'Configured tunnel address cannot be verified') from exc
 
-    def verify_transport_ready(self, transport):
+    @staticmethod
+    def _proxy_unit(proxy):
+        if proxy.startswith('xray'): return 'xray.service'
+        if proxy.startswith('v2ray'): return 'v2ray.service'
+        if proxy == 'shadowsocks': return 'shadowsocks-libev-manager@manager.service'
+        if proxy in ('shadowsocks-go', 'shadowsocks-rust'): return 'shadowsocks-go.service'
+        return None
+
+    def _proxy_active(self, proxy):
+        unit = self._proxy_unit(proxy)
+        if unit is None: return False
         try:
-            ready = (self._glory_ready() if transport == 'glorytun_tcp' else
-                     self._mq_active() and self._build_info().get('version') == '0.16.2')
+            if subprocess.run(['systemctl','is-active','--quiet',unit],check=False,
+                              capture_output=True,timeout=8).returncode != 0:
+                return False
+            # Only advertise adapters whose TCP/MPTCP listener and the
+            # primary user's matching credentials can be checked locally.
+            with configuration_lock(self.config_lock):
+                primary = _read_json(self.admin_config)['users'][0]['openmptcprouter']
+            if proxy in ('shadowsocks-go', 'shadowsocks-rust'):
+                config, users = _read_json(self.ss_go_config), _read_json(self.ss_go_users)
+                servers = [s for s in config.get('servers', []) if isinstance(s, dict) and s.get('name') == 'ss-2022']
+                if len(servers) != 1: return False
+                server = servers[0]
+                store = server.get('uPSKStorePath')
+                if not isinstance(store, str) or os.path.realpath(store) != os.path.realpath(self.ss_go_users):
+                    return False
+                listeners = server.get('tcpListeners', [])
+                if not listeners or not isinstance(listeners[0], dict): return False
+                listener = listeners[0]
+                address = listener.get('address', '')
+                if (listener.get('network') != 'tcp' or listener.get('multipath') is not True or
+                        not isinstance(address, str) or ':' not in address): return False
+                host, port = address.rsplit(':', 1)
+                psk, userkey = server.get('psk'), users.get('openmptcprouter')
+                if (not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536 or
+                        host.strip('[]').lower() in ('127.0.0.1','::1','localhost') or
+                        server.get('protocol') != '2022-blake3-aes-256-gcm' or
+                        not isinstance(psk, str) or not psk or not isinstance(userkey, str) or not userkey):
+                    return False
+                cached = primary.get('shadowsocks-go')
+                matches = cached is None or (isinstance(cached, dict) and str(cached.get('port')) == port and
+                    cached.get('protocol') == server['protocol'] and cached.get('password') == psk + ':' + userkey)
+                return matches and self._tcp_listening(port)
+            if proxy == 'shadowsocks':
+                config = _read_json(self.ss_libev_config)
+                port = str(primary.get('shadowsocks_port', ''))
+                keys = config.get('port_key', {})
+                if not isinstance(keys, dict): return False
+                port_conf = config.get('port_conf', {})
+                if not isinstance(port_conf, dict): return False
+                entry = port_conf.get(port, {})
+                key = keys.get(port) or (entry.get('key') if isinstance(entry, dict) else None)
+                return (config.get('mptcp') is True and config.get('mode', 'tcp_and_udp') in ('tcp_only','tcp_and_udp') and
+                        port.isascii() and port.isdigit() and 0 < int(port) < 65536 and isinstance(key,str) and bool(key) and
+                        self._tcp_listening(port))
+            # Xray/v2ray may be installed, but their per-inbound MPTCP and
+            # credential correspondence require separate capability checks.
+            return False
+        except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, RuntimeError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def _tcp_listening(port):
+        result = subprocess.run(['ss','-H','-ltn','sport','=', ':' + str(port)],check=False,
+                                capture_output=True,text=True,timeout=8)
+        return result.returncode == 0 and bool(result.stdout.strip())
+
+    def verify_transport_ready(self, transport, proxy=None):
+        try:
+            if transport == 'none': ready = self._proxy_active(proxy or '')
+            elif transport == 'glorytun_tcp': ready = self._glory_ready()
+            elif transport == 'mqvpn': ready = self._mq_active() and self._build_info().get('version') == '0.16.2'
+            else: ready = False
         except (OSError, RuntimeError, ProfileError, subprocess.SubprocessError):
             ready = False
         if not ready:
             raise ProfileError(409, 'Selected VPN service is not ready for the route')
 
     def apply_route(self, transport, remote):
-        if remote != self.expected_remote(transport):
+        if transport == 'none' and remote is not None:
+            raise ProfileError(409, 'No-tunnel profiles must clear the router tunnel address')
+        if transport != 'none' and remote != self.expected_remote(transport):
             raise ProfileError(409, 'Router address does not match the selected tunnel')
         with configuration_lock(self.config_lock):
             data = _read_json(self.admin_config)
             user = data['users'][0]['openmptcprouter']
-            user['vpnremoteip'] = remote
+            if transport == 'none': user.pop('vpnremoteip', None)
+            else: user['vpnremoteip'] = remote
             _write_json(self.admin_config, data)
         self._refresh_forwarding()
         with configuration_lock(self.config_lock):
-            if _read_json(self.admin_config)['users'][0]['openmptcprouter'].get('vpnremoteip') != remote:
+            user = _read_json(self.admin_config)['users'][0]['openmptcprouter']
+            if ((transport == 'none' and 'vpnremoteip' in user) or
+                    (transport != 'none' and user.get('vpnremoteip') != remote)):
                 raise RuntimeError('Router address readback mismatch')
 
     def _refresh_forwarding(self):
@@ -570,14 +655,19 @@ class Runtime:
         if not fec_schemes and 'backup_fec' in mq_schedulers:
             mq_schedulers.remove('backup_fec')
         proxy_available = ['none']
-        if Path('/etc/shadowsocks-libev/manager.json').is_file(): proxy_available.append('shadowsocks')
-        if Path('/etc/shadowsocks-go/server.json').is_file(): proxy_available.extend(('shadowsocks-go','shadowsocks-rust'))
+        if Path(self.ss_libev_config).is_file(): proxy_available.append('shadowsocks')
+        if Path(self.ss_go_config).is_file(): proxy_available.extend(('shadowsocks-go','shadowsocks-rust'))
         if Path('/etc/v2ray/v2ray-server.json').is_file(): proxy_available.extend(x for x in PROXIES if x.startswith('v2ray'))
         if Path('/etc/xray/xray-server.json').is_file(): proxy_available.extend(x for x in PROXIES if x.startswith('xray'))
-        transports = (['mqvpn'] if mq_known else []) + (['glorytun_tcp'] if self._glory_ready() else [])
+        proxy_status = {}
+        for name in proxy_available:
+            unit = self._proxy_unit(name)
+            if unit and unit not in proxy_status: proxy_status[unit] = self._proxy_active(name)
+        tcp_proxies = [name for name in proxy_available if self._proxy_unit(name) and proxy_status[self._proxy_unit(name)]]
+        transports = (['mqvpn'] if mq_known else []) + (['glorytun_tcp'] if self._glory_ready() else []) + (['none'] if tcp_proxies else [])
         return {'tcp_schedulers': sorted(schedulers), 'tcp_cc': sorted(available.intersection(TCP_CC)),
                 'mq_schedulers': mq_schedulers, 'mq_cc': list(MQ_CC) if mq_known else [],
-                'fec_schemes': fec_schemes, 'transports': transports, 'proxies': proxy_available,
+                'fec_schemes': fec_schemes, 'transports': transports, 'proxies': proxy_available, 'tcp_proxies': tcp_proxies,
                 'mq_running': bool(info)}
 
     def snapshot(self, requested):
@@ -643,6 +733,8 @@ class Runtime:
                 raise ProfileError(409, 'Requested VPN transport is unavailable')
             if requested.get('proxy') not in available.get('proxies', []):
                 raise ProfileError(409, 'Requested proxy is unavailable')
+            if requested['transport'] == 'none' and requested.get('proxy') not in available.get('tcp_proxies', []):
+                raise ProfileError(409, 'No-tunnel profile requires an active TCP proxy')
             self._selection(required=True)
         if mq is not None:
             if mq['scheduler'] not in available['mq_schedulers'] or mq['cc'] not in available['mq_cc']:
@@ -940,7 +1032,9 @@ class ProfileManager:
                 return {'result': 'done', 'transaction': transaction, 'state': 'unknown', 'deadline': None, 'seconds_remaining': None}
             return {key: state.get(key) for key in ('transaction', 'state', 'deadline', 'error')} | {
                 'result': 'done', 'seconds_remaining': int(self._remaining(state)),
-                'route_ready': state.get('route', {}).get('state') == 'ready'}
+                'route_ready': state.get('route', {}).get('state') == 'ready',
+                'route_no_tunnel': (state.get('route', {}).get('no_tunnel', False)
+                                    if state.get('route', {}).get('state') == 'ready' else None)}
 
     def apply(self, transaction, requested):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
@@ -992,8 +1086,10 @@ class ProfileManager:
                     'deadline': state['deadline'], 'pending': True,
                     'seconds_remaining': int(self._remaining(state))}
 
-    def route(self, transaction, remote):
+    def route(self, transaction, remote=None, no_tunnel=False):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
+        if type(no_tunnel) is not bool or (no_tunnel and remote is not None) or (not no_tunnel and remote is None):
+            raise ProfileError(422, 'Specify one tunnel IPv4 address or an explicit no-tunnel request')
         with self.locked():
             self._expire_locked()
             state = self._load()
@@ -1001,26 +1097,32 @@ class ProfileManager:
                 raise ProfileError(404, 'Profile transaction not found')
             if state['state'] != 'pending' or 'transport' not in state['target']:
                 raise ProfileError(409, 'Profile transaction is not awaiting a route')
+            transport = state['target']['transport']
+            if (transport == 'none') != no_tunnel:
+                raise ProfileError(409, 'Route request does not match the selected transport')
             if state.get('route', {}).get('state') == 'ready':
-                if state['route'].get('remote') != remote:
+                if (state['route'].get('remote') != remote or
+                        state['route'].get('no_tunnel', False) != no_tunnel):
                     raise ProfileError(409, 'Profile route is already associated with another address')
-                return {'result':'done', 'transaction':transaction, 'state':'pending', 'route_ready':True}
+                return {'result':'done', 'transaction':transaction, 'state':'pending',
+                        'route_ready':True, 'no_tunnel':no_tunnel}
             if hasattr(self.runtime, 'verify_transport_ready'):
-                self.runtime.verify_transport_ready(state['target']['transport'])
-            if remote != self.runtime.expected_remote(state['target']['transport']):
+                self.runtime.verify_transport_ready(transport, state['target'].get('proxy'))
+            if not no_tunnel and remote != self.runtime.expected_remote(transport):
                 raise ProfileError(409, 'Router address does not match the selected tunnel')
-            state['route'] = {'state':'applying', 'remote':remote}
+            state['route'] = {'state':'applying', 'no_tunnel':True} if no_tunnel else {'state':'applying', 'remote':remote}
             state['before']['route_touched'] = True
             self._write(state)
             try:
-                self.runtime.apply_route(state['target']['transport'], remote)
+                self.runtime.apply_route(transport, remote)
             except Exception as error:
                 state = self._rollback_locked(state)
                 raise ProfileError(503, 'Profile route apply failed; ' +
                                    ('rollback incomplete' if state['state'] == 'rollback_failed' else 'previous settings restored')) from error
             state['route']['state'] = 'ready'
             self._write(state)
-            return {'result':'done', 'transaction':transaction, 'state':'pending', 'route_ready':True}
+            return {'result':'done', 'transaction':transaction, 'state':'pending',
+                    'route_ready':True, 'no_tunnel':no_tunnel}
 
     def finish(self, transaction, confirm):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
