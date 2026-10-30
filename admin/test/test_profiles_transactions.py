@@ -211,7 +211,7 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(self.runtime.applies, 0)
 
     def test_unavailable_external_watchdog_refuses_any_change(self):
-        def unavailable(): raise profiles.ProfileError(503, 'Watchdog unavailable')
+        def unavailable(_requested): raise profiles.ProfileError(503, 'Watchdog unavailable')
         self.runtime.ensure_recovery_ready = unavailable
         with self.assertRaises(profiles.ProfileError) as error:
             self.manager.apply(TX, REQ)
@@ -267,6 +267,7 @@ class RuntimeTests(unittest.TestCase):
             saved={'scheduler':{'present':True,'value':'wlb'},
                    'reorder':{'parent_present':True,'fields':{'enabled':{'present':True,'value':'auto'}}}}
             with patch.object(profiles.subprocess,'run') as run:
+                run.return_value.returncode = 0
                 runtime._set_mq({'scheduler':'minrtt','reorder':{'enabled':'off'}})
                 actual=json.loads(path.read_text())
                 self.assertEqual(actual['auth_key'],config['auth_key'])
@@ -277,7 +278,9 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
                 runtime._set_mq(saved,restore=True)
             self.assertEqual(json.loads(path.read_text()),config)
-            self.assertEqual(run.call_count,4)  # restart plus is-active, each direction
+            commands=[call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands.count(['systemctl','restart','mqvpn']),2)
+            self.assertEqual(commands.count(['systemctl','is-active','--quiet','mqvpn']),4)
 
     def test_sysctl_rewrite_keeps_unmanaged_lines(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -318,7 +321,7 @@ class RuntimeTests(unittest.TestCase):
                 runtime.availability=lambda:{'tcp_schedulers':['default','bpf_red'],
                     'tcp_cc':['cubic','bbr','nanbbr3_light'],'mq_schedulers':['wlb','minrtt'],
                     'mq_cc':['bbr2'],'fec_schemes':['xor']}
-                runtime.ensure_recovery_ready=lambda:None
+                runtime.ensure_recovery_ready=lambda _requested:None
                 manager=profiles.ProfileManager(runtime,root/'journal',root/'lock',
                                                   clock=lambda:1000,enable_timer=False)
                 request={'mptcp':{'scheduler':'bpf_red','congestion_control':'nanbbr3_light',

@@ -94,3 +94,57 @@ def test_manual_rollback_restores_previous_values(profile_manager, user_client):
     assert response.json()['state']=='rolled_back'
     assert runtime.current()==before
     assert mgr.status(TX)['state']=='rolled_back'
+
+
+def test_transport_schema_rejects_ambiguous_combinations(profile_manager,user_client):
+    _,runtime=profile_manager
+    valid_mptcp=copy.deepcopy(REQ['mptcp'])
+    invalid=[
+        {'transport':'glorytun_tcp','proxy':'none','mptcp':valid_mptcp,'mqvpn':REQ['mqvpn']},
+        {'transport':'mqvpn','proxy':'none','mptcp':valid_mptcp},
+        {'transport':'glorytun_tcp','mptcp':valid_mptcp},
+        {'proxy':'none','mptcp':valid_mptcp,'mqvpn':REQ['mqvpn']},
+        {'transport':'openvpn','proxy':'none','mptcp':valid_mptcp},
+    ]
+    for payload in invalid:
+        assert user_client.post('/profiles/apply',json={'transaction':TX,**payload}).status_code==422
+    assert runtime.applies==0
+
+
+def test_legacy_selection_mutations_are_blocked_while_transaction_pending(profile_manager,user_client):
+    mgr,_=profile_manager;mgr.apply(TX,REQ)
+    assert user_client.post('/vpn',json={'vpn':'glorytun_tcp'}).status_code==409
+    assert user_client.post('/proxy',json={'proxy':'none'}).status_code==409
+    assert user_client.post('/vpnips',json={'remoteip':'10.255.255.2','localip':'10.255.255.1'}).status_code==409
+
+
+def test_capability_version_negotiation_keeps_legacy_response(profile_manager,user_client):
+    legacy=user_client.get('/profiles/capabilities').json()
+    modern=user_client.get('/profiles/capabilities',params={'version':2}).json()
+    assert legacy['version']==1 and modern['version']==2
+    assert set(legacy['current'])=={'mptcp','mqvpn'}
+    assert user_client.get('/profiles/capabilities',params={'version':3}).status_code==422
+
+
+def test_v2_route_is_required_before_confirm_and_is_idempotent(profile_manager,user_client):
+    mgr,runtime=profile_manager
+    runtime.apply=lambda target:None
+    runtime.expected_remote=lambda transport:'10.255.255.2'
+    applied=[]
+    runtime.apply_route=lambda transport,ip:applied.append((transport,ip))
+    payload={'transaction':TX,'transport':'glorytun_tcp','proxy':'none','mptcp':REQ['mptcp']}
+    assert user_client.post('/profiles/apply',json=payload).status_code==200
+    assert user_client.post('/profiles/confirm',json={'transaction':TX}).status_code==409
+    wrong={'transaction':TX,'vpnremoteip':'10.255.220.2'}
+    assert user_client.post('/profiles/route',json=wrong).status_code==409
+    route={'transaction':TX,'vpnremoteip':'10.255.255.2'}
+    assert user_client.post('/profiles/route',json=route).json()['route_ready'] is True
+    assert user_client.post('/profiles/route',json=route).json()['route_ready'] is True
+    assert len(applied)==1
+    assert user_client.get('/profiles/status',params={'transaction':TX}).json()['route_ready'] is True
+    assert user_client.post('/profiles/confirm',json={'transaction':TX}).json()['state']=='confirmed'
+
+
+def test_profile_route_requires_authentication(profile_manager,unauth_client):
+    route={'transaction':TX,'vpnremoteip':'10.255.255.2'}
+    assert unauth_client.post('/profiles/route',json=route).status_code in (401,403)

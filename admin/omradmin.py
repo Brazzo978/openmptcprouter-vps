@@ -35,6 +35,7 @@ from tempfile import mkstemp
 from typing import List, Optional, Literal
 from functools import wraps
 import omr_profiles
+import omr_profile_firewall
 from shutil import move
 from enum import Enum
 from os import path
@@ -514,6 +515,11 @@ def get_userid_from_username(username):
     return int(data['users'][0][username]['userid'])
 
 def check_username_serial(username, serial):
+    with omr_profiles.configuration_lock():
+        return _check_username_serial_locked(username, serial)
+
+
+def _check_username_serial_locked(username, serial):
     data = read_omr_config()
     if not data:
         return False
@@ -537,31 +543,32 @@ def check_username_serial(username, serial):
     return False
 
 def set_global_param(key, value):
-    data = read_omr_config()
-    if not data:
-        LOG.debug("Can't read file for set_global_param")
-        return {'error': 'Config file not readable', 'route': 'global_param'}
-    if not key in data or data[key] != value:
-        data[key] = value
-        #LOG.debug("backup_config() in set_global_param")
-        backup_config()
-        with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json', 'w') as outfile:
-            json.dump(data, outfile, indent=4)
+    with omr_profiles.configuration_lock():
+        data = read_omr_config()
+        if not data:
+            LOG.debug("Can't read file for set_global_param")
+            return {'error': 'Config file not readable', 'route': 'global_param'}
+        if not key in data or data[key] != value:
+            data[key] = value
+            backup_config()
+            with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json', 'w') as outfile:
+                json.dump(data, outfile, indent=4)
 #    else:
 #        LOG.debug("Already exist data for set_global_param key:" + key)
 
 def modif_config_user(user, changes):
-    with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json') as f:
-        content = json.load(f)
-    content_initial = copy.deepcopy(content)
-    content['users'][0][user].update(changes)
-    if content_initial != content:
-        LOG.debug("backup_config() in modif_config_user")
-        backup_config()
-        with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json', 'w') as f:
-            json.dump(content, f, indent=4)
-    else:
-        LOG.debug("No real changes in modif_config_user")
+    with omr_profiles.configuration_lock():
+        with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json') as f:
+            content = json.load(f)
+        content_initial = copy.deepcopy(content)
+        content['users'][0][user].update(changes)
+        if content_initial != content:
+            LOG.debug("backup_config() in modif_config_user")
+            backup_config()
+            with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json', 'w') as f:
+                json.dump(content, f, indent=4)
+        else:
+            LOG.debug("No real changes in modif_config_user")
 
 # Default VXLAN L3 (routed P2P) tunnel addresses, one /30 (v4) and one /126
 # (v6) per userid, server side .1 / router side .2. Userids 0..63 keep the
@@ -1838,68 +1845,21 @@ def _nft_flush_chain(chain, rule_lines):
 
 def _render_fw_ports(config_data):
     """Pure: (accept_rules, dnat_rules) from every user's fw_ports entries."""
-    accept_rules, dnat_rules = [], []
-    users = config_data.get('users', [{}])[0]
-    for username, udata in users.items():
-        for entry in udata.get('fw_ports', []):
-            name = entry.get('name', '')
-            port = entry.get('port', '')
-            proto = entry.get('proto', 'tcp')
-            fwtype = entry.get('fwtype', 'ACCEPT')
-            family = entry.get('family', 4)
-            source_dip = entry.get('source_dip', '')
-            dest_ip = entry.get('dest_ip', '')
-            vpn = entry.get('vpn', 'default')
-            comment = entry.get('comment', '')
-            match = f'meta nfproto {"ipv4" if family == 4 else "ipv6"}'
-            # source_dip/dest_ip are Shorewall's own confusing legacy naming:
-            # source_dip is actually the pre-NAT/original destination (which
-            # public IP the connection arrived on, ORIGDEST in Shorewall
-            # terms), dest_ip is a source-host restriction (Shorewall's
-            # SOURCE zone sub-host syntax) -- kept as-is for continuity with
-            # every existing caller (shorewallopen etc).
-            if source_dip:
-                match += f' {"ip" if family == 4 else "ip6"} daddr {source_dip}'
-            if dest_ip:
-                match += f' {"ip" if family == 4 else "ip6"} saddr {dest_ip}'
-            tag = _nft_comment(f'OMR {username} {"open" if fwtype == "ACCEPT" else "redirect"} {name} {proto}{comment}')
-            if fwtype == 'ACCEPT':
-                accept_rules.append(f'{match} {proto} dport {port} accept comment "{tag}"')
-            elif fwtype == 'DNAT':
-                if vpn != 'default':
-                    target = vpn
-                elif family == 4:
-                    target = udata.get('vpnremoteip', '')
-                else:
-                    target = 'fd00::a0{:x}:2'.format(udata.get('userid', 0) or 0)
-                if not target:
-                    continue  # no known tunnel address yet -- nothing to redirect to
-                dnat_rules.append(f'{match} {proto} dport {port} dnat {"ip" if family == 4 else "ip6"} to {target} comment "{tag}"')
-    return accept_rules, dnat_rules
+    return omr_profile_firewall.render_fw_ports(config_data)
 
 def _render_bulk_redirect(config_data):
     """The old `/shorewall` bulk "redirect ports 1-64999" toggle, targeting
     userid 0 (the primary/default user) same as before."""
-    lines = []
-    default_user = config_data.get('users', [{}])[0].get('openmptcprouter', {})
-    if config_data.get('bulk_redirect_v4'):
-        target = default_user.get('vpnremoteip', '')
-        if target:
-            for proto in ('tcp', 'udp'):
-                lines.append(f'meta nfproto ipv4 {proto} dport 1-64999 dnat ip to {target} comment "OMR bulk redirect {proto}"')
-    if config_data.get('bulk_redirect_v6'):
-        target6 = 'fd00::a0{:x}:2'.format(default_user.get('userid', 0) or 0)
-        for proto in ('tcp', 'udp'):
-            lines.append(f'meta nfproto ipv6 {proto} dport 1-64999 dnat ip6 to {target6} comment "OMR bulk redirect {proto}6"')
-    return lines
+    return omr_profile_firewall.render_bulk_redirect(config_data)
 
 def _nft_sync_ports():
-    config_data = read_omr_config()
-    if not config_data:
-        return False
-    accept_rules, dnat_rules = _render_fw_ports(config_data)
-    dnat_rules = _render_bulk_redirect(config_data) + dnat_rules
-    return _nft_flush_chain('user_accept', accept_rules) and _nft_flush_chain('user_dnat', dnat_rules)
+    with omr_profiles.configuration_lock():
+        config_data = read_omr_config()
+        if not config_data:
+            return False
+        accept_rules, dnat_rules = _render_fw_ports(config_data)
+        dnat_rules = _render_bulk_redirect(config_data) + dnat_rules
+        return _nft_flush_chain('user_accept', accept_rules) and _nft_flush_chain('user_dnat', dnat_rules)
 
 def _fw_port_key(entry):
     return (entry.get('name'), str(entry.get('port')), entry.get('proto'),
@@ -2181,6 +2141,11 @@ def shorewall6_del_port(username, port, proto, name, fwtype='ACCEPT', source_dip
     _fw_port_del(username, str(port), proto, name, fwtype, 6, source_dip, dest_ip)
 
 def set_lastchange(sync=0):
+    with omr_profiles.configuration_lock():
+        return _set_lastchange_locked(sync)
+
+
+def _set_lastchange_locked(sync=0):
     configdata = read_omr_config()
     if not configdata:
         return {'error': 'Config file not readable', 'route': 'lastchange'}
@@ -5038,6 +5003,7 @@ def _installed_vpn_types():
 
 # Set global VPN config
 @app.post('/vpn', summary="Set current VPN used by the current user")
+@_profile_guard
 def vpn(*, vpnconfig: Vpn, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         #set_lastchange(10)
@@ -5292,6 +5258,7 @@ def _installed_proxy_types():
 
 # Set global Proxy config
 @app.post('/proxy', summary="Set Proxy used by the current user")
+@_profile_guard
 def proxy(*, proxyconfig: Proxy, current_user: User = Depends(get_current_user)):
     if current_user.permissions == "ro":
         #set_lastchange(10)
@@ -5594,7 +5561,8 @@ def mqvpn_set_config(*, params: MQVPN, current_user: User = Depends(get_current_
         #set_lastchange()
     return {'result': 'done', 'reason': 'changes applied', 'route': 'mqvpn'}
 
-# Safe profile operations: never accept or return keys, addresses or users.
+# Safe profile operations never accept or return credentials or user lists.
+# V2 route binding accepts only the validated router tunnel IPv4 address.
 class _StrictProfileModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -5629,7 +5597,12 @@ class ProfileAction(_StrictProfileModel):
 
 class ProfileApply(ProfileAction):
     mptcp: ProfileMPTCP
-    mqvpn: ProfileMQVPN
+    mqvpn: Optional[ProfileMQVPN] = None
+    transport: Optional[Literal['mqvpn', 'glorytun_tcp']] = None
+    proxy: Optional[str] = Field(default=None, min_length=1, max_length=40, pattern=r'^[a-z0-9_-]+$')
+
+class ProfileRoute(ProfileAction):
+    vpnremoteip: str = Field(min_length=7, max_length=15, pattern=r'^[0-9.]+$')
 
 def _profile_authorize(user):
     if (user.userid not in (0, None) or
@@ -5647,9 +5620,10 @@ def _profile_call(func, *args):
         raise HTTPException(status_code=503, detail='Profile transaction unavailable') from error
 
 @app.get('/profiles/capabilities', summary='Get safe profile values and capabilities')
-def profile_capabilities(current_user: User = Depends(get_current_user)):
+def profile_capabilities(version: int = Query(1, ge=1, le=2),
+                         current_user: User = Depends(get_current_user)):
     _profile_authorize(current_user)
-    return _profile_call(_profile_manager.capabilities)
+    return _profile_call(_profile_manager.capabilities, version)
 
 @app.get('/profiles/status', summary='Get a profile transaction state')
 def profile_status(transaction: str = Query(..., pattern=r'^[0-9a-f]{32}$'),
@@ -5661,12 +5635,21 @@ def profile_status(transaction: str = Query(..., pattern=r'^[0-9a-f]{32}$'),
 def profile_apply(*, params: ProfileApply, current_user: User = Depends(get_current_user)):
     _profile_authorize(current_user)
     requested = params.model_dump(exclude={'transaction'}, exclude_none=True)
+    transport, proxy, mq = requested.get('transport'), requested.get('proxy'), requested.get('mqvpn')
+    if (transport is None and (proxy is not None or mq is None) or
+            transport is not None and (proxy is None or (transport == 'mqvpn') != (mq is not None))):
+        raise HTTPException(status_code=422, detail='Invalid profile transport and settings combination')
     return _profile_call(_profile_manager.apply, params.transaction, requested)
 
 @app.post('/profiles/confirm', summary='Confirm a pending profile transaction')
 def profile_confirm(*, params: ProfileAction, current_user: User = Depends(get_current_user)):
     _profile_authorize(current_user)
     return _profile_call(_profile_manager.finish, params.transaction, True)
+
+@app.post('/profiles/route', summary='Bind a pending profile to its verified router tunnel address')
+def profile_route(*, params: ProfileRoute, current_user: User = Depends(get_current_user)):
+    _profile_authorize(current_user)
+    return _profile_call(_profile_manager.route, params.transaction, params.vpnremoteip)
 
 @app.post('/profiles/rollback', summary='Restore the previous profile values')
 def profile_rollback(*, params: ProfileAction, current_user: User = Depends(get_current_user)):
@@ -6225,6 +6208,7 @@ class VPNips(BaseModel):
 
 # Set user vpn IPs
 @app.post('/vpnips', summary="Set current user VPN IPs")
+@_profile_guard
 def vpnips(*, vpnconfig: VPNips, current_user: User = Depends(get_current_user)):
     #if current_user.permissions == "ro":
     #    return {'result': 'permission', 'reason': 'Read only user', 'route': 'vpnips'}

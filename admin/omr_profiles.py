@@ -9,6 +9,7 @@ import copy
 import fcntl
 import glob
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import omr_profile_firewall
 
 TRANSACTION_RE = re.compile(r'^[0-9a-f]{32}$')
 TCP_CC = ('reno', 'cubic', 'bbr', 'bbr1', 'bbr2', 'nanqinlang') + tuple(
@@ -40,6 +42,12 @@ MQ_DEFAULTS = {'scheduler': 'wlb', 'cc': 'bbr2', 'fec_enable': False,
                'reorder': {'enabled': 'off', 'max_wait_ms': 30, 'cap_packets': 1024}}
 MQ_FIELDS = frozenset(MQ_DEFAULTS) - {'reorder'}
 REORDER_FIELDS = frozenset(MQ_DEFAULTS['reorder'])
+TRANSPORTS = ('mqvpn', 'glorytun_tcp')
+PROXIES = ('none', 'v2ray', 'v2ray-vmess', 'v2ray-socks', 'v2ray-trojan',
+           'v2ray-vless', 'xray', 'xray-vmess', 'xray-socks', 'xray-trojan',
+           'xray-shadowsocks', 'xray-vless', 'xray-vless-reality',
+           'shadowsocks', 'shadowsocks-go', 'shadowsocks-rust')
+CONFIG_LOCK = '/run/lock/omr-profile-config.lock'
 MPTCP_DEPENDENTS = ('shadowsocks-libev-manager@manager.service', 'shadowsocks-go.service',
                     'v2ray.service', 'xray.service', 'glorytun-tcp@tun0.service',
                     'openvpn@tun0.service')
@@ -50,6 +58,22 @@ class ProfileError(Exception):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+
+
+@contextlib.contextmanager
+def configuration_lock(filename=CONFIG_LOCK):
+    """Serialize profile selection and normal API config read-modify-writes."""
+    path = Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError('Configuration lock is not a regular file owned by the service')
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _atomic_bytes(filename, data, mode, owner=None):
@@ -246,21 +270,31 @@ class Runtime:
     def __init__(self, control_api, ensure_nanbbr, read_nanbbr,
                  mq_config='/etc/mqvpn/server.json',
                  sysctl_file='/etc/sysctl.d/90-shadowsocks.conf',
-                 nanbbr_file='/etc/openmptcprouter-vps-admin/nanbbr-var.json'):
+                 nanbbr_file='/etc/openmptcprouter-vps-admin/nanbbr-var.json',
+                 admin_config='/etc/openmptcprouter-vps-admin/omr-admin-config.json',
+                 vpn_file='/etc/openmptcprouter-vps-admin/current-vpn',
+                 proxy_file='/etc/openmptcprouter-vps-admin/current-proxy',
+                 glory_config='/etc/glorytun-tcp/tun0',
+                 config_lock=CONFIG_LOCK, nft_bin='/usr/sbin/nft',
+                 wg_helper='/usr/local/sbin/wg-remote-lan-route'):
         self.control_api = control_api
         self.ensure_nanbbr = ensure_nanbbr
         self.read_nanbbr = read_nanbbr
         self.mq_config, self.sysctl_file, self.nanbbr_file = mq_config, sysctl_file, nanbbr_file
+        self.admin_config, self.vpn_file, self.proxy_file = admin_config, vpn_file, proxy_file
+        self.glory_config, self.config_lock = glory_config, config_lock
+        self.nft_bin, self.wg_helper = nft_bin, wg_helper
 
-    def ensure_recovery_ready(self):
+    def ensure_recovery_ready(self, requested=None):
         try:
             subprocess.run(['systemctl', 'is-active', '--quiet', 'omr-profile-recovery.timer'],
                            check=True, timeout=5)
             # The independent watchdog accepts only local control sockets.
             # Prove it can query the actual configured daemon before changing it.
-            info = watchdog_control({'cmd': 'get_build_info'}, self.mq_config)
-            if not info.get('ok'):
-                raise RuntimeError('MQVPN local control did not respond')
+            if (not requested or requested.get('mqvpn') is not None) and self._mq_active():
+                info = watchdog_control({'cmd': 'get_build_info'}, self.mq_config)
+                if not info.get('ok'):
+                    raise RuntimeError('MQVPN local control did not respond')
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             raise ProfileError(503, 'Profile recovery watchdog is unavailable') from error
 
@@ -270,12 +304,195 @@ class Runtime:
             raise ProfileError(503, 'MQVPN control API is unavailable')
         return info
 
+    def _mq_active(self):
+        result = subprocess.run(['systemctl', 'is-active', '--quiet', 'mqvpn'],
+                                check=False, capture_output=True, timeout=8)
+        if result.returncode == 0: return True
+        if result.returncode == 3: return False
+        raise RuntimeError('MQVPN service status is unavailable')
+
+    def _mq_attested(self):
+        try:
+            if not Path(self.mq_config).is_file(): return False
+            package = subprocess.run(['dpkg-query', '-W', '-f=${Version}', 'mqvpn'],
+                                     check=True, capture_output=True, text=True, timeout=5).stdout.strip()
+            expected = VERIFIED_FEC_BINARIES.get(package)
+            if not expected or _sha256_file('/usr/bin/mqvpn') != expected: return False
+            # The fallback applies only while stopped. An active daemon with
+            # bad control/version must not inherit the on-disk binary's claim.
+            return not self._mq_active()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return False
+
+    def _selection(self, required=False):
+        try:
+            with configuration_lock(self.config_lock):
+                data = _read_json(self.admin_config)
+                user = data['users'][0]['openmptcprouter']
+                if not isinstance(user, dict) or user.get('userid', 0) != 0:
+                    raise ValueError('Primary OMR user is unavailable')
+                result = {name: user.get(name) for name in ('vpn', 'proxy')}
+                for name, filename in (('global_vpn', self.vpn_file), ('global_proxy', self.proxy_file)):
+                    try: result[name] = Path(filename).read_text(encoding='utf-8').strip()
+                    except FileNotFoundError: result[name] = None
+                for value in result.values():
+                    if value is not None and (not isinstance(value, str) or not re.fullmatch(r'[a-z0-9_-]{1,40}', value)):
+                        raise ValueError('Invalid OMR selection')
+                return result
+        except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError) as exc:
+            if required:
+                raise ProfileError(409, 'Primary OMR VPN/proxy selection is unavailable') from exc
+            return {'vpn': None, 'proxy': None, 'global_vpn': None, 'global_proxy': None}
+
+    def _selection_snapshot(self):
+        with configuration_lock(self.config_lock):
+            data = _read_json(self.admin_config)
+            user = data['users'][0]['openmptcprouter']
+            if not isinstance(user, dict) or user.get('userid', 0) != 0:
+                raise ProfileError(409, 'Primary OMR user is unavailable')
+            saved = {'user': {}, 'global': {}}
+            for name in ('vpn', 'proxy', 'vpnremoteip'):
+                value = user.get(name)
+                pattern = r'[0-9.]{7,15}' if name == 'vpnremoteip' else r'[a-z0-9_-]{1,40}'
+                if value is not None and (not isinstance(value, str) or not re.fullmatch(pattern, value)):
+                    raise ProfileError(409, 'Invalid OMR VPN/proxy selection')
+                if name == 'vpnremoteip' and value is not None:
+                    try: ipaddress.IPv4Address(value)
+                    except ValueError as exc: raise ProfileError(409, 'Invalid OMR remote address') from exc
+                saved['user'][name] = {'present': name in user, 'value': value}
+            for name, filename in (('vpn', self.vpn_file), ('proxy', self.proxy_file)):
+                try:
+                    value = Path(filename).read_text(encoding='utf-8').strip()
+                    if not re.fullmatch(r'[a-z0-9_-]{1,40}', value): raise ValueError('invalid selector')
+                    saved['global'][name] = {'present': True, 'value': value}
+                except FileNotFoundError:
+                    saved['global'][name] = {'present': False, 'value': None}
+            return saved
+
+    def _set_selection(self, transport=None, proxy=None, restore=None):
+        with configuration_lock(self.config_lock):
+            data = _read_json(self.admin_config)
+            user = data['users'][0]['openmptcprouter']
+            if not isinstance(user, dict) or user.get('userid', 0) != 0:
+                raise RuntimeError('Primary OMR user is unavailable')
+            for name, value in (('vpn', transport), ('proxy', proxy)):
+                if restore is not None:
+                    prior = restore['user'][name]
+                    if prior['present']: user[name] = prior['value']
+                    else: user.pop(name, None)
+                else:
+                    user[name] = value
+            if restore is not None and 'vpnremoteip' in restore['user']:
+                prior = restore['user']['vpnremoteip']
+                if prior['present']: user['vpnremoteip'] = prior['value']
+                else: user.pop('vpnremoteip', None)
+            _write_json(self.admin_config, data)
+            for name, filename, value in (('vpn', self.vpn_file, transport), ('proxy', self.proxy_file, proxy)):
+                if restore is not None:
+                    prior = restore['global'][name]
+                    if not prior['present']:
+                        Path(filename).unlink(missing_ok=True); continue
+                    value = prior['value']
+                _atomic_bytes(filename, (value + '\n').encode(), 0o600)
+
+    def expected_remote(self, transport):
+        try:
+            if transport == 'mqvpn':
+                cfg = _read_json(self.mq_config)
+                network = ipaddress.IPv4Network(cfg.get('subnet', '10.255.220.0/24'), strict=False)
+                entries = [u for u in cfg.get('users', []) if isinstance(u, dict) and u.get('name') == 'openmptcprouter']
+                if len(entries) != 1 or network.prefixlen > 30:
+                    raise ValueError('MQVPN primary address unavailable')
+                expected = ipaddress.IPv4Address(entries[0].get('fixed_ip') or str(network.network_address + 2))
+                local = network.network_address + 1
+                if any(isinstance(u, dict) and u.get('name') != 'openmptcprouter' and
+                       u.get('fixed_ip') == str(expected) for u in cfg.get('users', [])):
+                    raise ValueError('MQVPN client address overlaps another user')
+            elif transport == 'glorytun_tcp':
+                config = Path(self.glory_config).read_text(encoding='utf-8')
+                values = {}
+                for line in config.splitlines():
+                    match = re.match(r'^\s*(LOCALIP|REMOTEIP)\s*=\s*(.*?)\s*$', line)
+                    if match:
+                        key, value = match.groups()
+                        if key in values: raise ValueError('Ambiguous Glorytun address')
+                        values[key] = value.strip().strip("'\"")
+                local = ipaddress.IPv4Address(values.get('LOCALIP', '10.255.255.1'))
+                if 'LOCALIP' in values and 'REMOTEIP' not in values:
+                    raise ValueError('Glorytun remote address is not explicit')
+                expected = ipaddress.IPv4Address(values.get('REMOTEIP', '10.255.255.2'))
+                network = ipaddress.IPv4Network(str(local) + '/30', strict=False)
+            else:
+                raise ValueError('Unsupported tunnel')
+            if (not network.is_private or expected not in network or expected == local or
+                    expected in (network.network_address, network.broadcast_address)):
+                raise ValueError('Invalid configured tunnel address')
+            return str(expected)
+        except (OSError, ValueError, TypeError, UnicodeError, KeyError) as exc:
+            raise ProfileError(409, 'Configured tunnel address cannot be verified') from exc
+
+    def verify_transport_ready(self, transport):
+        try:
+            ready = (self._glory_ready() if transport == 'glorytun_tcp' else
+                     self._mq_active() and self._build_info().get('version') == '0.16.2')
+        except (OSError, RuntimeError, ProfileError, subprocess.SubprocessError):
+            ready = False
+        if not ready:
+            raise ProfileError(409, 'Selected VPN service is not ready for the route')
+
+    def apply_route(self, transport, remote):
+        if remote != self.expected_remote(transport):
+            raise ProfileError(409, 'Router address does not match the selected tunnel')
+        with configuration_lock(self.config_lock):
+            data = _read_json(self.admin_config)
+            user = data['users'][0]['openmptcprouter']
+            user['vpnremoteip'] = remote
+            _write_json(self.admin_config, data)
+        self._refresh_forwarding()
+        with configuration_lock(self.config_lock):
+            if _read_json(self.admin_config)['users'][0]['openmptcprouter'].get('vpnremoteip') != remote:
+                raise RuntimeError('Router address readback mismatch')
+
+    def _refresh_forwarding(self):
+        with configuration_lock(self.config_lock):
+            config = _read_json(self.admin_config)
+            accepted, redirected = omr_profile_firewall.render_fw_ports(config)
+            redirected = omr_profile_firewall.render_bulk_redirect(config) + redirected
+            script = 'flush chain inet omr user_accept\nflush chain inet omr user_dnat\n'
+            for chain, rules in (('user_accept', accepted), ('user_dnat', redirected)):
+                script += ''.join(f'add rule inet omr {chain} {rule}\n' for rule in rules)
+            subprocess.run([self.nft_bin, '-f', '-'], input=script, text=True,
+                           capture_output=True, check=True, timeout=15)
+        subprocess.run([self.wg_helper], check=True,
+                       capture_output=True, timeout=40)
+
+    def _glory_ready(self):
+        if not Path(self.glory_config).is_file() or not Path(str(self.glory_config) + '.key').is_file():
+            return False
+        try:
+            config = Path(self.glory_config).read_text(encoding='utf-8')
+            assignments = [line for line in config.splitlines() if re.match(r'\s*MPTCP\s*=', line)]
+            if len(assignments) != 1 or not re.fullmatch(
+                    r"\s*MPTCP\s*=\s*(?:true|1|'true'|\"true\")\s*(?:#.*)?", assignments[0]):
+                return False
+            return subprocess.run(['systemctl', 'is-active', '--quiet', 'glorytun-tcp@tun0.service'],
+                                  check=False, capture_output=True, timeout=8).returncode == 0
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            return False
+
     def current(self):
-        config = _read_json(self.mq_config)
-        mq = _mq_settings(config)
-        info = self._build_info()
-        if info.get('scheduler') != mq['scheduler']:
-            raise ProfileError(503, 'MQVPN running scheduler does not match saved configuration')
+        try:
+            config = _read_json(self.mq_config)
+            mq = _mq_settings(config)
+        except (OSError, ValueError, RuntimeError, ProfileError):
+            mq = None
+        if mq is not None:
+            try:
+                info = self._build_info()
+                if info.get('scheduler') != mq['scheduler']:
+                    mq = None
+            except (OSError, ValueError, RuntimeError, ProfileError):
+                pass  # The saved configuration is still readable while stopped.
         aggression = self.read_nanbbr()
         if aggression is None:
             for cc in ('nanbbr1_var', 'nanbbr2_var', 'nanbbr3_var'):
@@ -292,12 +509,17 @@ class Runtime:
             raise ProfileError(409, 'MPTCP profile settings have an invalid format')
         return {'mptcp': {'scheduler': scheduler,
                           'congestion_control': cc,
-                          'nanbbr_aggressiveness': aggression}, 'mqvpn': mq}
+                          'nanbbr_aggressiveness': aggression}, 'mqvpn': mq,
+                'selection': self._selection()}
 
     def availability(self):
-        info = self._build_info()
-        if info.get('version') != '0.16.2':
-            raise ProfileError(409, 'This MQVPN version has not been validated for profile switching')
+        try:
+            info = self._build_info()
+            if info.get('version') != '0.16.2':
+                info = {}
+        except (OSError, ValueError, RuntimeError, ProfileError):
+            info = {}
+        mq_known = bool(info) or self._mq_attested()
         try:
             schedulers = set(Path('/proc/sys/net/mptcp/available_schedulers').read_text().split())
         except OSError:
@@ -334,9 +556,9 @@ class Runtime:
                 if rc == 0: available.add(name)
             except (OSError, subprocess.SubprocessError):
                 pass
-        mq_schedulers = list(MQ_SCHEDULERS)
+        mq_schedulers = list(MQ_SCHEDULERS) if mq_known else []
         fec_schemes = []
-        if bool(info.get('fec_enabled')):
+        if bool(info.get('fec_enabled')) or (not info and mq_known):
             try:
                 package = subprocess.run(['dpkg-query', '-W', '-f=${Version}', 'mqvpn'],
                     check=True, capture_output=True, text=True, timeout=5).stdout.strip()
@@ -345,18 +567,25 @@ class Runtime:
                     fec_schemes = list(FEC_SCHEMES)
             except (OSError, subprocess.SubprocessError):
                 pass
-        if not fec_schemes:
+        if not fec_schemes and 'backup_fec' in mq_schedulers:
             mq_schedulers.remove('backup_fec')
+        proxy_available = ['none']
+        if Path('/etc/shadowsocks-libev/manager.json').is_file(): proxy_available.append('shadowsocks')
+        if Path('/etc/shadowsocks-go/server.json').is_file(): proxy_available.extend(('shadowsocks-go','shadowsocks-rust'))
+        if Path('/etc/v2ray/v2ray-server.json').is_file(): proxy_available.extend(x for x in PROXIES if x.startswith('v2ray'))
+        if Path('/etc/xray/xray-server.json').is_file(): proxy_available.extend(x for x in PROXIES if x.startswith('xray'))
+        transports = (['mqvpn'] if mq_known else []) + (['glorytun_tcp'] if self._glory_ready() else [])
         return {'tcp_schedulers': sorted(schedulers), 'tcp_cc': sorted(available.intersection(TCP_CC)),
-                'mq_schedulers': mq_schedulers, 'mq_cc': list(MQ_CC),
-                'fec_schemes': fec_schemes}
+                'mq_schedulers': mq_schedulers, 'mq_cc': list(MQ_CC) if mq_known else [],
+                'fec_schemes': fec_schemes, 'transports': transports, 'proxies': proxy_available,
+                'mq_running': bool(info)}
 
     def snapshot(self, requested):
         """Record exactly managed fields; never journal other config or keys."""
         current = self.current()
-        mq_cfg = _read_json(self.mq_config)
+        mq_cfg = _read_json(self.mq_config) if requested.get('mqvpn') is not None else {}
         old_mq = {}
-        for key in requested['mqvpn']:
+        for key in requested.get('mqvpn', {}):
             if key == 'reorder':
                 block = mq_cfg.get('reorder') or {}
                 old_mq[key] = {'parent_present': 'reorder' in mq_cfg, 'fields': {
@@ -397,22 +626,32 @@ class Runtime:
                 raise ProfileError(409, 'NanBBR aggression parameter is unavailable')
         return {'current': current, 'mq_fields': old_mq,
                 'sysctl': {'file_present': file_present, 'keys': selected, 'lines': saved_lines},
-                'nanbbr': nan}
+                'nanbbr': nan, 'selection': self._selection_snapshot() if 'transport' in requested else None,
+                'mq_service_active': self._mq_active() if requested.get('mqvpn') is not None else None}
 
     def validate(self, requested):
         available = self.availability()
-        tcp, mq = requested['mptcp'], requested['mqvpn']
+        tcp, mq = requested['mptcp'], requested.get('mqvpn')
         if tcp['scheduler'] not in available['tcp_schedulers']:
             raise ProfileError(409, 'TCP scheduler is unavailable')
         if tcp['congestion_control'] not in available['tcp_cc']:
             raise ProfileError(409, 'TCP congestion control is unavailable')
         if tcp['congestion_control'].endswith('_var') and tcp.get('nanbbr_aggressiveness') is None:
             raise ProfileError(422, 'NanBBR variable aggression is required')
-        if mq['scheduler'] not in available['mq_schedulers'] or mq['cc'] not in available['mq_cc']:
-            raise ProfileError(409, 'MQVPN scheduler or congestion control is unavailable')
-        old_mq = self.current()['mqvpn']
-        if mq.get('fec_enable', old_mq['fec_enable']) and mq.get('fec_scheme', old_mq['fec_scheme']) not in available['fec_schemes']:
-            raise ProfileError(409, 'Requested MQVPN FEC capability is unavailable')
+        if 'transport' in requested:
+            if requested['transport'] not in available.get('transports', []):
+                raise ProfileError(409, 'Requested VPN transport is unavailable')
+            if requested.get('proxy') not in available.get('proxies', []):
+                raise ProfileError(409, 'Requested proxy is unavailable')
+            self._selection(required=True)
+        if mq is not None:
+            if mq['scheduler'] not in available['mq_schedulers'] or mq['cc'] not in available['mq_cc']:
+                raise ProfileError(409, 'MQVPN scheduler or congestion control is unavailable')
+            old_mq = self.current()['mqvpn']
+            if old_mq is None:
+                raise ProfileError(503, 'MQVPN control API or configuration is unavailable')
+            if mq.get('fec_enable', old_mq['fec_enable']) and mq.get('fec_scheme', old_mq['fec_scheme']) not in available['fec_schemes']:
+                raise ProfileError(409, 'Requested MQVPN FEC capability is unavailable')
 
     def _set_sysctls(self, mptcp):
         previous = (_sysctl(_scheduler_key()), _sysctl('net.ipv4.tcp_congestion_control'))
@@ -452,6 +691,7 @@ class Runtime:
     def _set_mq(self, fields, restore=False):
         cfg = _read_json(self.mq_config)
         before = copy.deepcopy(cfg)
+        active = self._mq_active()
         for key, value in fields.items():
             if key == 'reorder':
                 block = cfg.get('reorder') or {}
@@ -471,8 +711,9 @@ class Runtime:
                 cfg[key] = value
         if cfg != before:
             _write_json(self.mq_config, cfg)
-        if cfg != before or restore:
-            subprocess.run(['systemctl', 'restart', 'mqvpn'], check=True, capture_output=True, timeout=30)
+        if cfg != before or restore or not active:
+            action = 'restart' if active or cfg != before or restore else 'start'
+            subprocess.run(['systemctl', action, 'mqvpn'], check=True, capture_output=True, timeout=30)
             subprocess.run(['systemctl', 'is-active', '--quiet', 'mqvpn'], check=True, timeout=8)
             deadline = time.monotonic() + 8
             while True:
@@ -485,9 +726,13 @@ class Runtime:
 
     def apply(self, requested):
         self._set_sysctls(requested['mptcp'])
-        self._set_mq(requested['mqvpn'])
+        if requested.get('mqvpn') is not None:
+            self._set_mq(requested['mqvpn'])
+        if 'transport' in requested:
+            self._set_selection(requested['transport'], requested['proxy'])
         actual = self.current()
         for group in ('mptcp', 'mqvpn'):
+            if requested.get(group) is None: continue
             for key, value in requested[group].items():
                 if value is None: continue
                 if key == 'reorder':
@@ -495,11 +740,28 @@ class Runtime:
                         raise RuntimeError('MQVPN reorder readback mismatch')
                 elif actual[group][key] != value:
                     raise RuntimeError('Profile settings readback mismatch')
+        if 'transport' in requested:
+            selection = actual['selection']
+            if (selection['vpn'] != requested['transport'] or selection['global_vpn'] != requested['transport'] or
+                    selection['proxy'] != requested['proxy'] or selection['global_proxy'] != requested['proxy']):
+                raise RuntimeError('Profile transport selection readback mismatch')
 
     def restore(self, saved):
         failures = []
-        try: self._set_mq(saved['mq_fields'], restore=True)
-        except Exception: failures.append('MQVPN')
+        if saved['mq_fields']:
+            try: self._set_mq(saved['mq_fields'], restore=True)
+            except Exception: failures.append('MQVPN')
+            if saved.get('mq_service_active') is False:
+                try:
+                    subprocess.run(['systemctl', 'stop', 'mqvpn'], check=True, capture_output=True, timeout=30)
+                    if self._mq_active(): raise RuntimeError('MQVPN remained active')
+                except Exception: failures.append('MQVPN service state')
+        if saved.get('selection') is not None:
+            try: self._set_selection(restore=saved['selection'])
+            except Exception: failures.append('VPN/proxy selection')
+            if saved.get('route_touched'):
+                try: self._refresh_forwarding()
+                except Exception: failures.append('VPN forwarding and remote access')
         previous = saved['current']['mptcp']
         try: _restore_scheduler(previous['scheduler'])
         except Exception: failures.append('MPTCP scheduler')
@@ -651,16 +913,23 @@ class ProfileManager:
             if state and state['state'] == 'preparing':
                 state['state'] = 'rolled_back'
                 self._write(state)
-            elif state and state['state'] == 'applying':
+            elif state and (state['state'] == 'applying' or
+                            (state['state'] == 'pending' and state.get('route', {}).get('state') == 'applying')):
                 self._rollback_locked(state)
             else:
                 self._expire_locked()
 
-    def capabilities(self):
+    def capabilities(self, version=1):
+        if version not in (1, 2): raise ProfileError(422, 'Unsupported profile capability version')
         with self.locked():
             self._expire_locked()
-            return {'supported': True, 'version': 1, 'current': self.runtime.current(),
-                    'availability': self.runtime.availability()}
+            current, available = self.runtime.current(), self.runtime.availability()
+            if version == 1:
+                if current.get('mqvpn') is None or not available.get('mq_running', True):
+                    raise ProfileError(503, 'MQVPN control API or configuration is unavailable')
+                current = {key:current[key] for key in ('mptcp', 'mqvpn')}
+                available = {key:available[key] for key in ('tcp_schedulers','tcp_cc','mq_schedulers','mq_cc','fec_schemes')}
+            return {'supported': True, 'version': version, 'current': current, 'availability': available}
 
     def status(self, transaction):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
@@ -670,7 +939,8 @@ class ProfileManager:
             if not state or state.get('transaction') != transaction:
                 return {'result': 'done', 'transaction': transaction, 'state': 'unknown', 'deadline': None, 'seconds_remaining': None}
             return {key: state.get(key) for key in ('transaction', 'state', 'deadline', 'error')} | {
-                'result': 'done', 'seconds_remaining': int(self._remaining(state))}
+                'result': 'done', 'seconds_remaining': int(self._remaining(state)),
+                'route_ready': state.get('route', {}).get('state') == 'ready'}
 
     def apply(self, transaction, requested):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
@@ -700,7 +970,7 @@ class ProfileManager:
             self._schedule(self._remaining(state))
             try:
                 if hasattr(self.runtime, 'ensure_recovery_ready'):
-                    self.runtime.ensure_recovery_ready()
+                    self.runtime.ensure_recovery_ready(requested)
                 self.runtime.validate(requested)
                 state['before'] = self.runtime.snapshot(requested)
                 state['state'] = 'applying'
@@ -722,6 +992,36 @@ class ProfileManager:
                     'deadline': state['deadline'], 'pending': True,
                     'seconds_remaining': int(self._remaining(state))}
 
+    def route(self, transaction, remote):
+        if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
+        with self.locked():
+            self._expire_locked()
+            state = self._load()
+            if not state or state.get('transaction') != transaction:
+                raise ProfileError(404, 'Profile transaction not found')
+            if state['state'] != 'pending' or 'transport' not in state['target']:
+                raise ProfileError(409, 'Profile transaction is not awaiting a route')
+            if state.get('route', {}).get('state') == 'ready':
+                if state['route'].get('remote') != remote:
+                    raise ProfileError(409, 'Profile route is already associated with another address')
+                return {'result':'done', 'transaction':transaction, 'state':'pending', 'route_ready':True}
+            if hasattr(self.runtime, 'verify_transport_ready'):
+                self.runtime.verify_transport_ready(state['target']['transport'])
+            if remote != self.runtime.expected_remote(state['target']['transport']):
+                raise ProfileError(409, 'Router address does not match the selected tunnel')
+            state['route'] = {'state':'applying', 'remote':remote}
+            state['before']['route_touched'] = True
+            self._write(state)
+            try:
+                self.runtime.apply_route(state['target']['transport'], remote)
+            except Exception as error:
+                state = self._rollback_locked(state)
+                raise ProfileError(503, 'Profile route apply failed; ' +
+                                   ('rollback incomplete' if state['state'] == 'rollback_failed' else 'previous settings restored')) from error
+            state['route']['state'] = 'ready'
+            self._write(state)
+            return {'result':'done', 'transaction':transaction, 'state':'pending', 'route_ready':True}
+
     def finish(self, transaction, confirm):
         if not TRANSACTION_RE.fullmatch(transaction): raise ProfileError(422, 'Invalid transaction')
         with self.locked():
@@ -732,6 +1032,8 @@ class ProfileManager:
             if confirm:
                 if state['state'] == 'confirmed': pass
                 elif state['state'] != 'pending': raise ProfileError(409, 'Profile transaction cannot be confirmed')
+                elif 'transport' in state['target'] and state.get('route', {}).get('state') != 'ready':
+                    raise ProfileError(409, 'Verify and apply the tunnel route before confirming')
                 else:
                     state['state'] = 'confirmed'; self._write(state)
                     if self.timer: self.timer.cancel()

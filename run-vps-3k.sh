@@ -13,7 +13,7 @@ else
     exit 1
 fi
 python3 "$admin_builder" --output "$PWD/debian"
-export OMR_ADMIN_BINARY_VERSION=0.18+20261030-3k5
+export OMR_ADMIN_BINARY_VERSION=0.18+20261030-3k6
 export OMR_ADMIN_LOCAL_DEB="$PWD/debian/omr-vps-admin_${OMR_ADMIN_BINARY_VERSION}_all.deb"
 admin_metadata_version="$(python3 -c 'import json; print(json.load(open("debian/omr-vps-admin-3k.json"))["version"])')"
 export OMR_ADMIN_EXPECTED_SHA256="$(python3 -c 'import json; print(json.load(open("debian/omr-vps-admin-3k.json"))["sha256"])')"
