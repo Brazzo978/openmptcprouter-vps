@@ -1,5 +1,14 @@
 # OpenMPTCProuter VPS 0.1163-3K
 
+This `omr-vps-0.1163-3K-next` branch also retains the candidate
+`patches/mqvpn/030-3k-smooth-failover.patch` for future source builds. It changes
+MQVPN client/path/socket behavior and preserves the wire protocol; paired lab
+tests used a rebuilt baseline server. The frozen lock, installer and DEB payload
+below remain the published 0.1163-3K/0.16.2-3k2 versions. No new VPS package or
+release is delivered by adding the source patch. The existing repack tool checks
+patches 010/020 only; a future candidate repack must explicitly include patch 030
+and record its binary/source provenance before changing any frozen package lock.
+
 Stable release paired with [client v0.64.2-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.2-3K). Run as root on **Debian 13 amd64 with an x86-64-v3 CPU**. The command downloads the complete bundle and verifies its SHA-256 checksum before running the installer:
 
 ```sh
