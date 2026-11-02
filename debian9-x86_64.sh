@@ -2037,7 +2037,7 @@ if [ "$WIREGUARD" = "yes" ]; then
 	echo "Install WireGuard"
 	rm -f /var/lib/dpkg/lock
 	rm -f /var/lib/dpkg/lock-frontend
-	apt-get -y install wireguard-tools --no-install-recommends
+	apt-get -y install wireguard-tools qrencode --no-install-recommends
 	if [ ! -f /etc/wireguard/wg0.conf ]; then
 		cd /etc/wireguard
 		umask 077; wg genkey | tee vpn-server-private.key | wg pubkey > vpn-server-public.key

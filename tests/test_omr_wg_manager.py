@@ -359,5 +359,6 @@ def test_frozen_installer_stages_manager_and_snapshot_before_helper_and_firewall
     reload=block.index('systemctl -q restart nftables')
     assert fresh < wrap < snapshot < helper < firewall < reload
     assert wrap < backend < snapshot
+    assert 'install wireguard-tools qrencode --no-install-recommends' in block
     for required in ('omr-wg-manager','omr_wg_manager.py','wg-remote-lan-route'):
         assert (ROOT/required).is_file()
