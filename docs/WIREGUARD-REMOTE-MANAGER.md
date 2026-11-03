@@ -1,7 +1,7 @@
-# Road-warrior WireGuard client manager (next 3K build)
+# Road-warrior WireGuard client manager (0.1164-3K)
 
-This document describes the development candidate, not the already published
-0.1163-3K archive. The manager controls the existing VPS `client-wg0` return-home
+This manager is included in VPS 0.1164-3K, paired with client 0.64.3-3K.
+It controls the existing VPS `client-wg0` return-home
 interface. It does not manage the router-facing `wg0` interface, port forwards,
 or MQVPN's independent LAN-prefix registration.
 

@@ -1,42 +1,50 @@
-# OpenMPTCProuter VPS 0.1163-3K
+# OpenMPTCProuter VPS 0.1164-3K
 
-This `omr-vps-0.1163-3K-next` branch also retains the candidate
-`patches/mqvpn/030-3k-smooth-failover.patch` for future source builds. It changes
-MQVPN client/path/socket behavior and preserves the wire protocol; paired lab
-tests used a rebuilt baseline server. The frozen lock, installer and DEB payload
-below remain the published 0.1163-3K/0.16.2-3k2 versions. No new VPS package or
-release is delivered by adding the source patch. The existing repack tool checks
-patches 010/020 only; a future candidate repack must explicitly include patch 030
-and record its binary/source provenance before changing any frozen package lock.
+Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The kernel and binary package set remain frozen; the admin API is **0.18+20261030-3k7**.
 
-Stable release paired with [client v0.64.2-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.2-3K). Run as root on **Debian 13 amd64 with an x86-64-v3 CPU**. The command downloads the complete bundle and verifies its SHA-256 checksum before running the installer:
+## Install
+
+Run this copyable command as root. It downloads the complete versioned bundle and its release checksum file, verifies the archive, and only then starts installation:
 
 ```sh
-workdir=$(mktemp -d) && wget -O "$workdir/vps.tar.gz" https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1163-3K/openmptcprouter-vps-0.1163-3K.tar.gz && echo "5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7  $workdir/vps.tar.gz" | sha256sum -c - && tar -xzf "$workdir/vps.tar.gz" -C "$workdir" && cd "$workdir/openmptcprouter-vps-0.1163-3K" && ./run-vps-3k.sh install
+workdir=$(mktemp -d) && wget -P "$workdir" https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1164-3K/openmptcprouter-vps-0.1164-3K.tar.gz && wget -O "$workdir/SHA256SUMS" https://github.com/Brazzo978/openmptcprouter-vps/releases/download/v0.1164-3K/SHA256SUMS-vps-0.1164-3K && (cd "$workdir" && grep '  openmptcprouter-vps-0.1164-3K.tar.gz$' SHA256SUMS | sha256sum -c -) && tar -xzf "$workdir/openmptcprouter-vps-0.1164-3K.tar.gz" -C "$workdir" && cd "$workdir/openmptcprouter-vps-0.1164-3K" && ./run-vps-3k.sh install
 ```
 
-Installation changes networking, services and the kernel. Debian dependencies require APT access. Once installation completes, **reboot the VPS** to use the included kernel; SSH uses port **65222**. The generated router connection settings are in `/root/openmptcprouter_config.txt`; the PC/phone WireGuard profile is in `/root/wireguard-client.conf`.
+Installation changes networking, services and the kernel. Debian APT access is required for operating-system dependencies. Reboot after installation to use the frozen kernel. SSH uses **65222**. Router connection settings are generated in `/root/openmptcprouter_config.txt`; the initial remote WireGuard profile is `/root/wireguard-client.conf`.
 
-## Features
+For manual preparation, extract the release archive and run `./run-vps-3k.sh prepare`; this rebuilds/verifies the API package without installing it. A Git clone alone does not include all frozen binary assets.
 
-- Kernel and headers **6.18.41-20261013.x64v3-omr-3k**, pinned to this release; **BBRv3 (`bbr`) by default**, 18 congestion control algorithms and NanBBR variants.
-- **21 frozen OMR packages**, verified with SHA-256 checksums. The bundle includes the kernel, packages and API; the verified installation required no OMR downloads from Ysurac's repositories. Operating system dependencies come from Debian.
-- Native MQVPN **0.16.2-3k2**, with FEC/XOR/RSC/PKM support compiled in and LAN-prefix routing. Runtime FEC remains configurable.
-- Primary router IP **10.255.220.2** by default when available; explicit addresses and any other users are preserved.
-- API **0.18+20261016-3k4**, authenticated diagnostic logs with sensitive values redacted, and TCP reverse forwarding through the separate XRay backend and MQVPN tunnel.
-- Remote WireGuard access to the OMR GUI. LAN access is denied by default and can be enabled using the client checkbox or the VPS helper/API. An IPv4 full tunnel with `AllowedIPs = 0.0.0.0/0` can use the VPS public IP without enabling LAN access.
-- Router backups to the VPS and their API endpoints have been removed; automatic OMR updates are blocked to preserve the frozen build.
+## Included behavior
 
-## Validation
+- Kernel and headers **6.18.41-20261013.x64v3-omr-3k**, with **BBRv3 (`bbr`) as the default**.
+- **21 frozen OMR packages** and three frozen helpers, checked against SHA-256 locks. Canonical download assets are hosted on the 3K mirror or Brazzo release; the installed OMR APT source is local. Pinned Ysurac source ancestry remains documented in source locks.
+- Native MQVPN **0.16.2-3k2**, compiled FEC capability and LAN-prefix handling. FEC configuration is independent from compiled capability. The primary router defaults to **10.255.220.2** when available; explicit addresses and other users are preserved.
+- Profiles API v2, transport/proxy coordination, confirmation/rollback and forwarding/WireGuard target updates for MQVPN, Glorytun TCP and No tunnel. Use the paired client for the profile UI.
+- Independent Xray TCP reverse forwarding, native VPN forwarding, authenticated diagnostics with sensitive values redacted, and the existing removal of VPS router-backup endpoints.
+- A Bash WireGuard client manager with individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
 
-Installation from a clean Debian 13 snapshot completed with exit code 0, followed by a reboot into the frozen kernel and verification of all 21 packages. **67 live checks passed**: 31 installation/API/service checks, 8 checks using the actual MQVPN engine with a handshake and traffic to a test LAN, and 28 WireGuard checks covering external HTTPS/DNS, GUI access, LAN blocking, explicit access and revocation of established connections. The report adds archive identity verification, for **68 checks in total**. API suite: **1042 tests passed, 9 skipped**.
+## WireGuard clients
 
-SHA-256 of the exact bundle installed and published: `5cfffea16a826a678b5fead2da7e8647aa062de7da0f1f49a6723e8546a893a7`.
+Run `omr-wg-manager` as root for the menu. Scriptable examples:
 
-The WireGuard checks use simulated OMR GUI/LAN endpoints; native MQVPN routing was tested separately with actual packets. The previous physical fiber + 5G test client was deleted by the user and was not paired again after the clean installation. Earlier physical-client and TCP forwarding checks are documented in the client release. No controlled aggregated-throughput benchmark or long-term XRay stability proof is claimed.
+```sh
+omr-wg-manager status
+omr-wg-manager add phone
+omr-wg-manager add laptop --full
+omr-wg-manager lan phone allow
+omr-wg-manager disable phone
+omr-wg-manager enable phone
+omr-wg-manager remove phone
+```
 
-## Source and installation
+`show NAME` and `qr NAME` deliberately display private profile material. Use a private terminal; `qr` requires `qrencode`. See [the manager guide](docs/WIREGUARD-REMOTE-MANAGER.md) for export, migration and recovery details.
 
-Default branch: [`omr-vps-0.1163-3K`](https://github.com/Brazzo978/openmptcprouter-vps/tree/omr-vps-0.1163-3K). The `v0.1163-3K` tag identifies the source code in the verified bundle; the branch also contains these installation instructions. A plain clone does not include all frozen binaries: use the command above or the complete release bundle.
+New split profiles route `10.255.0.0/16` and permit only the router GUI on its current tunnel address, TCP 80/443. New clients cannot access LAN devices by default. IPv4 Internet through the VPS is available with `--full` / `AllowedIPs = 0.0.0.0/0`, without granting LAN access.
 
-See [README-3K.md](https://github.com/Brazzo978/openmptcprouter-vps/blob/omr-vps-0.1163-3K/README-3K.md) for manual installation and WireGuard details. Verify the other assets with `SHA256SUMS-vps-0.1163-3K`.
+LAN access requires **both** `omr-wg-manager lan NAME allow` and the router's global checkbox, or `wg-remote-lan-route --lan-access allow` on the VPS. Disabling either blocks existing LAN exchanges as well as new connections. Split profiles must also include the synchronized LAN subnet; re-export after enabling it. Existing legacy clients retain their documented migration behavior. No tunnel intentionally suspends tunnel-based router GUI/LAN access; manage that transition from the LAN or an independent path.
+
+## Validation and limits
+
+The API/kernel/frozen payload was clean-installed on Debian 13 and rebooted before the paired tests. Subsequent tests with the actual VMware r7 client passed native/independent Xray forwarding (17 checks), WireGuard GUI/full IPv4 Internet/peer lifecycle and a distinct Windows LAN permission/revocation matrix (28), and all six client profiles including real WireGuard GUI retargeting. The frozen hashes, installed package versions and service health were rechecked. The 0.1164 archive preserves those binaries; its release labels, source packaging and preparation are verified separately.
+
+The x86 lab does not establish physical multi-WAN throughput, IPv6, mobile QR onboarding or arbitrary legacy upgrades. On the tested VMnet2 NAT path, MPTCP options were lost between the client and VPS; the other WAN negotiated MPTCP correctly. Source patches 030/040/050 are retained for MQVPN client maintenance; the frozen VPS server binary remains 0.16.2-3k2.
