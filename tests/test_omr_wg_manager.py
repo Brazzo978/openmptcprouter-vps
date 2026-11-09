@@ -351,14 +351,304 @@ def test_frozen_installer_stages_manager_and_snapshot_before_helper_and_firewall
     start=script.index('if [ "$WIREGUARD" = "yes" ]; then')
     block=script[start:]
     fresh=block.index('if [ ! -f /etc/wireguard/client-wg0.conf ]; then')
-    wrap=block.index('install -m 0755 "$DIR/omr-wg-manager"')
+    wrap=block.index('install -m 0755 "$DIR/omr-rth"')
     backend=block.index('install -m 0644 "$DIR/omr_wg_manager.py"')
-    snapshot=block.index('/usr/local/sbin/omr-wg-manager init --defer-firewall')
+    snapshot=block.index('/usr/local/sbin/omr-rth init --defer-firewall')
     helper=block.index('install -m 0755 "$DIR/wg-remote-lan-route"')
     firewall=block.index('cp ${DIR}/nftables/omr.nft /etc/nftables/omr.nft')
     reload=block.index('systemctl -q restart nftables')
     assert fresh < wrap < snapshot < helper < firewall < reload
     assert wrap < backend < snapshot
     assert 'install wireguard-tools qrencode --no-install-recommends' in block
-    for required in ('omr-wg-manager','omr_wg_manager.py','wg-remote-lan-route'):
+    for required in ('omr-rth','omr-wg-manager','omr_wg_manager.py','wg-remote-lan-route'):
         assert (ROOT/required).is_file()
+
+
+def test_installation_default_is_first_without_renaming_or_recreating_keys(lab):
+    m,s=lab
+    m.add('Alice'); m.add('Bob')
+    data=mod.read_registry(m.registry)
+    data['peers'].append(data['peers'].pop(0)); m.persist(data)
+    keys_before=s.live.copy(); profile_before=m.legacy_profile.read_bytes(); s.calls.clear()
+    rows=m.status()['peers']
+    assert [p['name'] for p in rows]==['legacy_2','Alice','Bob']
+    assert [p['installation_default'] for p in rows]==[True,False,False]
+    assert s.live==keys_before and m.legacy_profile.read_bytes()==profile_before
+    assert ['wg','genkey'] not in s.calls
+
+
+def test_default_identity_uses_installer_public_key_and_does_not_guess_address(lab):
+    m,s=lab; m.add('Alice')
+    public=m.config.parent/'vpn-client-public.key'; public.write_text(key(99)+'\n')
+    assert not any(p['installation_default'] for p in m.status()['peers'])
+    public.write_text(key(1)+'\n')
+    assert m.status()['peers'][0]['installation_default']
+    public.unlink(); m.legacy_profile.write_text(m.legacy_profile.read_text().replace(key(2),key(9)))
+    assert not any(p['installation_default'] for p in m.status()['peers'])
+
+
+def test_reused_default_address_does_not_become_installation_default(lab):
+    m,s=lab; m.disable('legacy_2',remove=True); m.add('Alice')
+    row=m.status()['peers'][0]
+    assert row['ip']=='10.255.246.2' and not row['installation_default']
+    assert m.profile('Alice')!=m.legacy_profile.read_text()
+
+
+def test_numbered_selection_retries_invalid_input_and_selects_default(lab,monkeypatch,capsys):
+    m,s=lab; m.add('Alice')
+    values=iter(['0','3','bad','1'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    assert mod.select_client(m,'Select the existing client you want to revoke')=='legacy_2'
+    output=capsys.readouterr().out
+    assert '1) legacy_2 (installation default)' in output
+    assert '2) Alice' in output and output.count('Choose one of the listed clients.')==3
+
+
+def test_add_wizard_reuses_endpoint_and_allocates_after_installer_client(lab,monkeypatch,capsys):
+    m,s=lab
+    values=iter(['bad name','a_name_is_far_too_long','Alice','','bad','y'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    monkeypatch.setattr(mod.shutil,'which',lambda command:None)
+    original=m.legacy_profile.read_bytes()
+    mod.new_client_wizard(m)
+    peer=mod.read_registry(m.registry)['peers'][-1]
+    assert peer['name']=='Alice' and peer['ip']=='10.255.246.3' and peer['mode']=='full'
+    assert not peer['lan'] and m.legacy_profile.read_bytes()==original
+    assert 'AllowedIPs = 0.0.0.0/0' in m.profile('Alice')
+    assert 'Your client config file is in' in capsys.readouterr().out
+
+
+def test_endpoint_inheritance_is_section_aware_and_accepts_wireguard_comments(lab):
+    m,_=lab
+    m.legacy_profile.write_text('[Interface]\nEndpoint = wrong.example:1234\n\n[Peer] # server\n'
+                                'Endpoint = vps.example.net:65312 # retained server\n')
+    assert m.endpoint()=='vps.example.net:65312'
+
+
+@pytest.mark.parametrize('profile',[
+    '[Interface]\nEndpoint = wrong.example:1234\n',
+    '[Peer]\nEndpoint = one.example:1234\nEndpoint = two.example:1234\n',
+    '[Peer]\nEndpoint = one.example:1234\n[Peer]\nEndpoint = two.example:1234\n',
+])
+def test_ambiguous_installer_endpoint_requires_explicit_override(lab,profile):
+    m,_=lab; m.legacy_profile.write_text(profile)
+    with pytest.raises(mod.ManagerError,match='missing or ambiguous'):
+        m.endpoint()
+    assert m.endpoint('override.example:65312')=='override.example:65312'
+
+
+@pytest.mark.parametrize('endpoint',['vps.example.net:0','vps.example.net:65536',
+                                     '[bad::123::456]:65312',
+                                     '999.1.2.3:65312','bad..example:65312','-bad.example:65312','bad.example..:65312',
+                                     'vps.example.net:65312\nDNS = 9.9.9.9'])
+def test_explicit_endpoint_rejects_invalid_port_or_config_injection(lab,endpoint):
+    m,_=lab
+    with pytest.raises(mod.ManagerError):m.endpoint(endpoint)
+
+
+def test_existing_ipv6_outer_endpoint_remains_compatible_without_ipv6_tunnel(lab):
+    m,_=lab
+    assert m.endpoint('[2001:db8::1]:65312')=='[2001:db8::1]:65312'
+
+
+@pytest.mark.parametrize('fields,expected',[
+    ('DNS = 9.9.9.9, 1.0.0.1 # existing resolvers\n','9.9.9.9, 1.0.0.1'),
+    ('DNS = 9.9.9.9\nDNS = 9.9.9.9, 1.0.0.1\n','9.9.9.9, 1.0.0.1'),
+    ('DNS = 999.1.2.3, bad.example, 8.8.8.8\n','8.8.8.8'),
+    ('DNS = 2606:4700:4700::1111, local.example\n','1.1.1.1'),
+    ('DNS = not-a-resolver;bad\n','1.1.1.1'),
+    ('','1.1.1.1'),
+])
+def test_dns_inherits_valid_ipv4_only_and_deduplicates_directives(lab,fields,expected):
+    m,_=lab
+    m.legacy_profile.write_text('[Interface]\n'+fields+'[Peer]\nDNS = 6.6.6.6\n')
+    before=m.legacy_profile.read_bytes()
+    assert m.client_dns()==expected
+    assert m.legacy_profile.read_bytes()==before
+
+
+def test_new_profile_reuses_dns_without_changing_original_profile_or_default_key(lab):
+    m,s=lab
+    text=m.legacy_profile.read_text().replace('[Interface]\n','[Interface]\nDNS = 9.9.9.9, 1.0.0.1 # customized\n',1)
+    m.legacy_profile.write_text(text); before=m.legacy_profile.read_bytes(); original_key=s.live.copy()
+    m.add('Alice')
+    assert 'DNS = 9.9.9.9, 1.0.0.1\n' in m.profile('Alice')
+    assert m.legacy_profile.read_bytes()==before
+    assert all(s.live.get(public)==address for public,address in original_key.items())
+
+
+def test_new_profile_defaults_to_mtu_1320_and_keepalive_25(lab):
+    m,_=lab; before=m.legacy_profile.read_bytes()
+    m.add('Alice'); profile=m.profile('Alice')
+    assert 'MTU = 1320\n' in profile and 'PersistentKeepalive = 25\n' in profile
+    assert m.legacy_profile.read_bytes()==before
+
+
+@pytest.mark.parametrize('mtu,keepalive',[('1380','15'),('1280','0'),('1400','off')])
+def test_new_profile_inherits_explicit_mtu_and_keepalive_including_disabled(lab,mtu,keepalive):
+    m,s=lab
+    text=m.legacy_profile.read_text().replace('[Interface]\n','[Interface]\nMTU = '+mtu+' # chosen\n',1)
+    text=text.replace('[Peer]\n','[Peer]\nPersistentKeepalive = '+keepalive+' # chosen\n',1)
+    m.legacy_profile.write_text(text); original=m.legacy_profile.read_bytes(); legacy=s.live.copy()
+    m.add('Alice'); generated=m.profile('Alice')
+    assert 'MTU = '+mtu+'\n' in generated and 'PersistentKeepalive = '+keepalive+'\n' in generated
+    assert m.legacy_profile.read_bytes()==original
+    assert all(s.live.get(key)==address for key,address in legacy.items())
+
+
+def test_link_settings_ignore_fields_in_wrong_sections(lab):
+    m,_=lab
+    m.legacy_profile.write_text('[Interface]\nPersistentKeepalive = 7\n[Peer]\nMTU = 1500\n')
+    assert m.client_link_settings()==('1320','25')
+
+
+@pytest.mark.parametrize('text',[
+    '[Interface]\nMTU = 1320\nMTU = 1400\n',
+    '[Interface]\nMTU = 1320\n[Interface]\nMTU = 1400\n',
+    '[Interface]\nMTU = 0\n', '[Interface]\nMTU = auto\n',
+    '[Interface]\nMTU = 65536\n',
+    '[Peer]\nPersistentKeepalive = 25\nPersistentKeepalive = 15\n',
+    '[Peer]\nPersistentKeepalive = -1\n', '[Peer]\nPersistentKeepalive = 65536\n',
+    '[Peer]\nPersistentKeepalive = yes\n',
+])
+def test_malformed_or_duplicate_explicit_link_settings_are_rejected(lab,text):
+    m,_=lab; m.legacy_profile.write_text(text); before=m.legacy_profile.read_bytes()
+    with pytest.raises(mod.ManagerError):m.client_link_settings()
+    assert m.legacy_profile.read_bytes()==before
+
+
+def test_installer_mtu_flag_only_adds_missing_server_mtu_without_live_changes(lab):
+    m,s=lab; before=m.config.read_text(); original_profile=m.legacy_profile.read_bytes()
+    router_config=m.config.parent/'wg0.conf'; router_config.write_text('router-owned original\n')
+    s.calls.clear(); m.initialize(defer_firewall=True,default_server_mtu=True)
+    assert m.config.read_text()==before.replace('[Interface]\n','[Interface]\nMTU = 1320\n',1)
+    assert m.legacy_profile.read_bytes()==original_profile
+    assert router_config.read_text()=='router-owned original\n'
+    assert not s.calls
+
+
+def test_server_mtu_existing_explicit_value_is_preserved_and_regular_init_leaves_absent_mtu(lab):
+    m,_=lab; original=m.config.read_bytes()
+    m.initialize(); assert m.config.read_bytes()==original
+    m.config.write_text(m.config.read_text().replace('[Interface]\n','[Interface]\nMTU = 1420 # explicit\n',1))
+    explicit=m.config.read_bytes(); m.initialize(defer_firewall=True,default_server_mtu=True)
+    assert m.config.read_bytes()==explicit
+
+
+def test_mtu_flag_does_not_change_config_when_registry_is_lost(lab):
+    m,_=lab; original=m.config.read_bytes(); m.registry.unlink()
+    with pytest.raises(mod.ManagerError):m.initialize(default_server_mtu=True)
+    assert m.config.read_bytes()==original
+
+
+def test_fresh_installer_defaults_only_rth_server_and_installation_client():
+    script=(ROOT/'debian9-x86_64.sh').read_text()
+    router=script.split('cat > /etc/wireguard/wg0.conf <<-EOF',1)[1].split('\n\t\tEOF',1)[0]
+    server=script.split('cat > /etc/wireguard/client-wg0.conf <<-EOF',1)[1].split('\n\t\tEOF',1)[0]
+    client=script.split('cat > /root/wireguard-client.conf <<-EOF',1)[1].split('\n\t\tEOF',1)[0]
+    assert 'MTU = 1320' not in router
+    assert 'MTU = 1320' in server and 'MTU = 1320' in client
+    assert 'PersistentKeepalive = 25' in client
+    assert script.count('omr-rth init --defer-firewall --default-server-mtu')==2
+
+
+def test_add_wizard_retries_duplicate_name_and_invalid_or_reserved_address(lab,monkeypatch):
+    m,_=lab; m.add('Alice')
+    values=iter(['alice','Bob','2','255','192.168.1.5','4','n'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    monkeypatch.setattr(mod.shutil,'which',lambda command:None)
+    mod.new_client_wizard(m)
+    peer=mod.read_registry(m.registry)['peers'][-1]
+    assert peer['name']=='Bob' and peer['ip']=='10.255.246.4' and peer['mode']=='split'
+
+
+def test_add_wizard_reports_saved_profile_even_if_qr_rendering_fails(lab,monkeypatch,capsys):
+    m,_=lab; values=iter(['Alice','','n'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    monkeypatch.setattr(mod.shutil,'which',lambda command:'/usr/bin/qrencode')
+    def failed_qr(*args):raise mod.ManagerError('Synthetic QR failure')
+    monkeypatch.setattr(mod,'show_qr',failed_qr)
+    mod.new_client_wizard(m)
+    output=capsys.readouterr()
+    assert 'Your client config file is in' in output.out
+    assert 'Client created; QR display failed.' in output.err
+    assert (m.clients/'Alice.conf').exists()
+
+
+def test_no_endpoint_value_is_displayed_as_not_set(lab,capsys):
+    m,s=lab
+    def fields(args,**kwargs):
+        if args==['wg','show','client-wg0','endpoints']:
+            return subprocess.CompletedProcess(args,0,key(1)+'\t(none)\n','')
+        return s(args,**kwargs)
+    m.runner=fields
+    mod.display_connected_clients(m.status())
+    output=capsys.readouterr().out
+    assert 'Not set' in output and '(none)' not in output
+
+
+def test_menu_revoke_requires_confirmation_and_handles_errors(lab,monkeypatch,capsys):
+    m,s=lab; m.add('Alice')
+    values=iter(['99','3','1','n','7','2','8','2','12'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    assert mod.interactive_menu(m)==0
+    assert key(1) in s.live and len(s.live)==2
+    output=capsys.readouterr().out
+    assert 'Choose one of the listed options.' in output
+    assert 'Client disabled.' in output and 'Client enabled.' in output
+    assert 'IPv6' not in output and 'Port Forwarding' not in output
+
+
+def test_menu_revoke_selected_additional_peer_preserves_default(lab,monkeypatch):
+    m,s=lab; m.add('Alice')
+    values=iter(['3','2','y','12'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(values))
+    assert mod.interactive_menu(m)==0
+    assert s.live=={key(1):'10.255.246.2'}
+    assert m.legacy_profile.exists()
+
+
+def test_menu_eof_and_empty_selection_are_safe(lab,monkeypatch,capsys):
+    m,s=lab
+    def eof(prompt):raise EOFError
+    monkeypatch.setattr('builtins.input',eof)
+    assert mod.interactive_menu(m)==0
+    m.disable('legacy_2',remove=True)
+    assert mod.select_client(m,'Select a client') is None
+    assert 'You have no existing clients!' in capsys.readouterr().out
+
+
+def test_reference_connected_display_parses_targeted_public_wireguard_fields(lab,capsys):
+    m,s=lab
+    def fields(args,**kwargs):
+        if args==['wg','show','client-wg0','endpoints']:
+            return subprocess.CompletedProcess(args,0,key(1)+'\t198.51.100.11:52222\n','')
+        return s(args,**kwargs)
+    m.runner=fields
+    info=m.status(); row=info['peers'][0]
+    row.update(last_handshake_age_seconds=10,rx_bytes=1048576,tx_bytes=1048576)
+    mod.display_connected_clients(info,now=1735689600)
+    output=capsys.readouterr().out
+    assert '| Client IP          | Last Handshake    | Status' in output
+    assert '2024/12/31 23:59' in output and 'Connected' in output
+    assert '198.51.100.11:52222' in output and '2 MB' in output
+    assert key(1) not in output and key(2) not in output
+    assert ['wg','show','all','dump'] not in s.calls
+
+
+@pytest.mark.parametrize('age,expected',[(None,'Never Connected'),(239,'Connected'),(240,'Disconnected')])
+def test_connected_display_matches_reference_four_minute_threshold(lab,capsys,age,expected):
+    m,_=lab; info=m.status(); info['peers'][0]['last_handshake_age_seconds']=age
+    mod.display_connected_clients(info,now=1735689600)
+    output=capsys.readouterr().out
+    assert expected in output
+    if age is None:assert 'Never' in output and 'Not set' in output
+
+
+def test_remote_installer_also_installs_canonical_command_and_initializes_before_helper():
+    script=(ROOT/'debian9-x86_64.sh').read_text()
+    start=script.index('for wg_file in omr-rth omr-wg-manager omr_wg_manager.py; do')
+    block=script[start:]
+    assert block.index('/usr/local/sbin/omr-rth init --defer-firewall') < block.index('wget -O /usr/local/sbin/wg-remote-lan-route')
+    assert 'exec /usr/local/sbin/omr-rth "$@"' in (ROOT/'omr-wg-manager').read_text()
+    assert 'exec python3 "$helper" menu' in (ROOT/'omr-rth').read_text()

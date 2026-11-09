@@ -2058,6 +2058,7 @@ if [ "$WIREGUARD" = "yes" ]; then
 		PrivateKey = $(cat /etc/wireguard/vpn-server-private.key | tr -d "\n")
 		ListenPort = 65312
 		Address = 10.255.246.1/24
+		MTU = 1320
 		SaveConfig = true
 		
 		[Peer]
@@ -2069,6 +2070,7 @@ if [ "$WIREGUARD" = "yes" ]; then
 		cat > /root/wireguard-client.conf <<-EOF
 		[Interface]
 		Address = 10.255.246.2/24
+		MTU = 1320
 		# Public DNS also works when AllowedIPs is changed to 0.0.0.0/0.
 		DNS = 1.1.1.1
 		PrivateKey = $(cat /etc/wireguard/vpn-client-private.key | tr -d "\n")
@@ -2087,20 +2089,29 @@ if [ "$WIREGUARD" = "yes" ]; then
 	# Forwarding to the router LAN uses a dedicated policy table and is refreshed
 	# after OMR has synced its LAN prefixes and established the VPN tunnel.
 	if [ "$LOCALFILES" = "yes" ]; then
-		for wg_file in wg-remote-lan-route wg-remote-lan-route.service.in wg-remote-lan-route.timer.in omr-wg-manager omr_wg_manager.py; do
+		for wg_file in wg-remote-lan-route wg-remote-lan-route.service.in wg-remote-lan-route.timer.in omr-rth omr-wg-manager omr_wg_manager.py; do
 			[ -f "$DIR/$wg_file" ] || { echo "Missing local WireGuard helper: $DIR/$wg_file" >&2; exit 1; }
 		done
+		install -m 0755 "$DIR/omr-rth" /usr/local/sbin/omr-rth
 		install -m 0755 "$DIR/omr-wg-manager" /usr/local/sbin/omr-wg-manager
 		install -m 0644 "$DIR/omr_wg_manager.py" /usr/local/sbin/omr_wg_manager.py
 		# Snapshot all existing /32 peer identities before installing the new
 		# firewall. Refuse unsafe/ambiguous migrations without changing them.
-		/usr/local/sbin/omr-wg-manager init --defer-firewall || {
+		/usr/local/sbin/omr-rth init --defer-firewall --default-server-mtu || {
 			echo "Unable to migrate existing WireGuard clients safely" >&2; exit 1;
 		}
 		install -m 0755 "$DIR/wg-remote-lan-route" /usr/local/sbin/wg-remote-lan-route
 		install -m 0644 "$DIR/wg-remote-lan-route.service.in" /etc/systemd/system/wg-remote-lan-route.service
 		install -m 0644 "$DIR/wg-remote-lan-route.timer.in" /etc/systemd/system/wg-remote-lan-route.timer
 	else
+		for wg_file in omr-rth omr-wg-manager omr_wg_manager.py; do
+			wget -O "/usr/local/sbin/$wg_file" "${VPSURL}${VPSPATH}/$wg_file" || exit 1
+		done
+		chmod 0755 /usr/local/sbin/omr-rth /usr/local/sbin/omr-wg-manager
+		chmod 0644 /usr/local/sbin/omr_wg_manager.py
+		/usr/local/sbin/omr-rth init --defer-firewall --default-server-mtu || {
+			echo "Unable to migrate existing WireGuard clients safely" >&2; exit 1;
+		}
 		wget -O /usr/local/sbin/wg-remote-lan-route "${VPSURL}${VPSPATH}/wg-remote-lan-route"
 		wget -O /etc/systemd/system/wg-remote-lan-route.service "${VPSURL}${VPSPATH}/wg-remote-lan-route.service.in"
 		wget -O /etc/systemd/system/wg-remote-lan-route.timer "${VPSURL}${VPSPATH}/wg-remote-lan-route.timer.in"

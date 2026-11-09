@@ -6,6 +6,7 @@ written to logs; peer identity and policy are based on public keys plus /32s.
 """
 import argparse
 import base64
+from datetime import datetime, timezone
 import fcntl
 import ipaddress
 import json
@@ -13,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,10 +24,57 @@ POOL = ipaddress.IPv4Network('10.255.246.0/24')
 INTERFACE = 'client-wg0'
 NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$')
 STATES = {'active', 'disabled', 'adding', 'disabling', 'removing', 'quarantine'}
+DEFAULT_MTU = 1320
+DEFAULT_KEEPALIVE = 25
 
 
 class ManagerError(Exception):
     pass
+
+
+def profile_setting(text, section, field):
+    """Read one explicit scalar setting without guessing among duplicate sections."""
+    current = ''; sections = 0; values = []
+    for line in text.splitlines():
+        value = line.split('#', 1)[0].strip()
+        if value.startswith('[') and value.endswith(']'):
+            current = value[1:-1].strip().lower()
+            sections += current == section.lower()
+        elif current == section.lower() and '=' in value:
+            name, value = (part.strip() for part in value.split('=', 1))
+            if name.lower() == field.lower():
+                values.append(value)
+    if values and (sections != 1 or len(values) != 1):
+        raise ManagerError('Installation profile has an ambiguous ' + field + ' setting')
+    return values[0] if values else None
+
+
+def numeric_setting(value, field, low, high, default, allow_off=False):
+    if value is None:
+        return str(default)
+    if allow_off and value.lower() == 'off':
+        return 'off'
+    if not re.fullmatch(r'[0-9]{1,5}', value) or not low <= int(value) <= high:
+        raise ManagerError('Installation profile has an invalid ' + field + ' setting')
+    return value
+
+
+def with_default_mtu(text):
+    """Add the RTH server MTU only when absent; preserve every explicit value."""
+    existing = profile_setting(text, 'interface', 'MTU')
+    numeric_setting(existing, 'MTU', 68, 65535, DEFAULT_MTU)
+    if existing is not None:
+        return text
+    lines = text.splitlines(keepends=True)
+    interfaces = [i for i,line in enumerate(lines)
+                  if line.split('#',1)[0].strip().lower() == '[interface]']
+    if len(interfaces) != 1:
+        raise ManagerError('Cannot add MTU to an ambiguous client-wg0 interface')
+    index = interfaces[0]
+    if not lines[index].endswith('\n'):
+        lines[index] += '\n'
+    lines.insert(index+1, 'MTU = ' + str(DEFAULT_MTU) + '\n')
+    return ''.join(lines)
 
 
 def valid_key(value):
@@ -321,11 +370,13 @@ class Manager:
         options = argparse.Namespace(config=module.CONFIG, dry_run=False, tunnel_dev=None, lan_access=None)
         module.reconcile(options, module.lan_access_enabled())
 
-    def initialize(self, defer_firewall=False):
+    def initialize(self, defer_firewall=False, default_server_mtu=False):
         fd = self.lock()
         try:
             if self.registry.exists():
                 data = read_registry(self.registry)
+                if default_server_mtu:
+                    self.persist_default_server_mtu()
                 if not self.marker.exists():
                     atomic_write(self.marker, '1\n')
                 return data
@@ -335,6 +386,8 @@ class Manager:
             live = self.live(allow_down=True)
             if live is not None and live != configured:
                 raise ManagerError('Live/configured WireGuard peers differ; reconcile them before migration')
+            if default_server_mtu:
+                self.persist_default_server_mtu()
             # Existing keys retain their historic global-checkbox LAN behavior.
             peers = [{'name':'legacy_' + ip.rsplit('.', 1)[1], 'public_key':key, 'ip':ip,
                       'legacy':True, 'lan':True, 'state':'active', 'mode':'split'}
@@ -345,6 +398,13 @@ class Manager:
             return data
         finally:
             os.close(fd)
+
+    def persist_default_server_mtu(self):
+        # Installer-only persistence: never change a live link or restart it.
+        text = self.config_text(); parse_config(text)
+        updated = with_default_mtu(text)
+        if updated != text:
+            atomic_write(self.config, updated)
 
     def load(self):
         if not self.marker.exists() or not self.registry.exists():
@@ -388,27 +448,114 @@ class Manager:
     def endpoint(self, supplied=None):
         endpoint = supplied
         if not endpoint and self.legacy_profile.is_file():
+            endpoints = []; section = ''; peer_sections = 0
             for line in self.legacy_profile.read_text(encoding='utf-8').splitlines():
-                if re.match(r'^\s*Endpoint\s*=', line, re.I):
-                    endpoint = line.split('=', 1)[1].strip(); break
+                value = line.split('#', 1)[0].strip()
+                if value.startswith('[') and value.endswith(']'):
+                    section = value[1:-1].strip().lower()
+                    peer_sections += section == 'peer'
+                elif section == 'peer' and '=' in value:
+                    field, value = (part.strip() for part in value.split('=', 1))
+                    if field.lower() == 'endpoint':
+                        endpoints.append(value)
+            if peer_sections != 1 or len(endpoints) != 1:
+                raise ManagerError('Installation profile endpoint is missing or ambiguous; supply endpoint host:port explicitly')
+            endpoint = endpoints[0]
         if not endpoint or len(endpoint) > 260 or not re.fullmatch(r'(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):[0-9]{1,5}', endpoint):
             raise ManagerError('A valid public endpoint host:port is required')
         if int(endpoint.rsplit(':', 1)[1]) not in range(1, 65536):
             raise ManagerError('Invalid WireGuard endpoint port')
+        host = endpoint.rsplit(':', 1)[0]
+        if host.startswith('['):
+            try:
+                ipaddress.IPv6Address(host[1:-1])
+            except ValueError as exc:
+                raise ManagerError('Invalid WireGuard endpoint address') from exc
+        elif re.fullmatch(r'[0-9.]+', host):
+            try:
+                ipaddress.IPv4Address(host)
+            except ValueError as exc:
+                raise ManagerError('Invalid WireGuard endpoint address') from exc
+        elif len(host) > 253 or any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+                                    for label in (host[:-1] if host.endswith('.') else host).split('.')):
+            raise ManagerError('Invalid WireGuard endpoint hostname')
         return endpoint
+
+    def client_dns(self):
+        """Reuse only IPv4 resolver addresses from the installer's Interface.
+
+        wg-quick accepts repeated DNS directives, so merge/deduplicate them.
+        IPv6 resolvers/search domains are outside this IPv4 manager's scope.
+        """
+        resolvers = []; section = ''
+        if self.legacy_profile.is_file():
+            for line in self.legacy_profile.read_text(encoding='utf-8').splitlines():
+                value = line.split('#', 1)[0].strip()
+                if value.startswith('[') and value.endswith(']'):
+                    section = value[1:-1].strip().lower()
+                elif section == 'interface' and '=' in value:
+                    field, value = (part.strip() for part in value.split('=', 1))
+                    if field.lower() != 'dns':
+                        continue
+                    for raw in value.split(','):
+                        try:
+                            resolver = str(ipaddress.IPv4Address(raw.strip()))
+                        except ValueError:
+                            continue
+                        if resolver not in resolvers:
+                            resolvers.append(resolver)
+        return ', '.join(resolvers) if resolvers else '1.1.1.1'
+
+    def client_link_settings(self):
+        text = self.legacy_profile.read_text(encoding='utf-8') if self.legacy_profile.is_file() else ''
+        mtu = numeric_setting(profile_setting(text, 'interface', 'MTU'), 'MTU', 68, 65535, DEFAULT_MTU)
+        keepalive = numeric_setting(profile_setting(text, 'peer', 'PersistentKeepalive'),
+                                    'PersistentKeepalive', 0, 65535, DEFAULT_KEEPALIVE, allow_off=True)
+        return mtu, keepalive
 
     def profile_path(self, peer):
         if peer['legacy']:
             return self.legacy_profile if peer['ip'] == str(POOL[2]) else None
         return self.clients / (peer['name'] + '.conf')
 
+    def default_peer_key(self, data):
+        """Identify the installer's client by its key, never by list position/IP alone."""
+        public_path = self.config.parent / 'vpn-client-public.key'
+        if public_path.is_file():
+            try:
+                public = public_path.read_text(encoding='utf-8').strip()
+            except (OSError, UnicodeError):
+                return None
+            if valid_key(public):
+                return next((p['public_key'] for p in data['peers']
+                             if p['legacy'] and p['public_key'] == public), None)
+            return None
+        # Older installations may retain only the exported installer profile.
+        for peer in data['peers']:
+            if peer['legacy'] and peer['ip'] == str(POOL[2]) and self.legacy_profile.is_file():
+                try:
+                    self.verify_legacy_profile(self.legacy_profile.read_text(encoding='utf-8'), peer)
+                    return peer['public_key']
+                except (ManagerError, OSError, UnicodeError):
+                    pass
+        return None
+
+    def next_address(self):
+        fd = self.lock()
+        try:
+            data = self.load(); self.ensure_consistent(data)
+            return self.allocate(data)
+        finally:
+            os.close(fd)
+
     def create_profile(self, peer, secret, server_key, endpoint):
         if not valid_key(secret) or not valid_key(server_key):
             raise ManagerError('Unable to generate valid WireGuard keys')
-        text = ('[Interface]\nPrivateKey = ' + secret + '\nAddress = ' + peer['ip'] + '/32\n'
-                'DNS = 1.1.1.1\n\n[Peer]\nPublicKey = ' + server_key + '\nEndpoint = ' + endpoint +
+        mtu, keepalive = self.client_link_settings()
+        text = ('[Interface]\nPrivateKey = ' + secret + '\nAddress = ' + peer['ip'] + '/32\nMTU = ' + mtu + '\n'
+                'DNS = ' + self.client_dns() + '\n\n[Peer]\nPublicKey = ' + server_key + '\nEndpoint = ' + endpoint +
                 '\nAllowedIPs = ' + ('0.0.0.0/0' if peer['mode'] == 'full' else '10.255.0.0/16') +
-                '\nPersistentKeepalive = 25\n')
+                '\nPersistentKeepalive = ' + keepalive + '\n')
         self.clients.mkdir(parents=True, exist_ok=True, mode=0o700); os.chmod(self.clients, 0o700)
         atomic_write(self.profile_path(peer), text)
 
@@ -607,6 +754,7 @@ class Manager:
                 result = self.command(['wg', 'show', INTERFACE, field], check=False)
                 return {line.split()[0]:line.split()[1:] for line in result.stdout.splitlines() if len(line.split()) >= 2} if result.returncode == 0 else {}
             handshakes = simple('latest-handshakes'); transfer = simple('transfer')
+            endpoints = simple('endpoints')
             grants, _ = peer_policy(self.registry,self.config,lambda *a,**k: self.command(a[0]).stdout) if live is not None else ([],[])
             master = self.gate_state.is_file() and self.gate_state.read_text().strip() == 'allow'
             def nft_elements(name):
@@ -621,7 +769,8 @@ class Manager:
             peer_set=nft_elements('wg_remote_peer_lan_v4')
             lan_set=nft_elements('wg_remote_lan_v4')
             rows = []
-            for p in data['peers']:
+            default_key = self.default_peer_key(data)
+            for p in sorted(data['peers'], key=lambda peer: peer['public_key'] != default_key):
                 h = handshakes.get(p['public_key'], ['0'])[0]
                 t = transfer.get(p['public_key'], ['0','0'])
                 try: age = max(0,int(time.time())-int(h)) if int(h) > 0 else None
@@ -629,6 +778,8 @@ class Manager:
                 firewall_known = peer_set is not None and lan_set is not None
                 actual_open = bool(nft_set_contains(peer_set, p['ip']) and lan_set) if firewall_known else None
                 rows.append({'name':p['name'],'ip':p['ip'],'state':p['state'],'legacy':p['legacy'],
+                             'installation_default':p['public_key'] == default_key,
+                             'endpoint':' '.join(endpoints.get(p['public_key'], [])) if endpoints.get(p['public_key']) != ['(none)'] else '',
                              'lan_requested':p['lan'],'master_lan':master,
                              'lan_peer_eligible':p['ip'] in grants,
                              # Report actual nft state even if persisted policy
@@ -646,23 +797,191 @@ class Manager:
             os.close(fd)
 
 
+# Wizard/display UX adapted from Brazzo978/wg-easy-ipv6-portfw (GPL-3.0),
+# commit 9bc51e768e1b49d71c6093335b081cc895cee876. See manager documentation.
+MENU_OPTIONS = (
+    'Add a new user', 'List all users', 'Remove an existing user',
+    'Display connected clients', 'Show a client configuration',
+    'Show a client QR code', 'Disable a client', 'Enable a client',
+    'Allow LAN access for a client', 'Deny LAN access for a client',
+    'Recover an interrupted peer operation', 'Exit',
+)
+
+
+def list_clients(peers):
+    if not peers:
+        print('You have no existing clients!')
+    for number, peer in enumerate(peers, 1):
+        suffix = ' (installation default)' if peer.get('installation_default') else ''
+        print(f"{number}) {peer['name']}{suffix} [{peer['ip']}, {peer['state']}]")
+
+
+def select_client(manager, prompt):
+    # Keep numbering stable while the prompt is open. The backend rechecks
+    # registry/configuration/runtime consistency before applying an operation.
+    peers = manager.status()['peers']
+    print(prompt); list_clients(peers)
+    if not peers:
+        return None
+    while True:
+        selection = input(f'Select one client [1-{len(peers)}]: ').strip()
+        if selection.isdecimal() and 1 <= int(selection) <= len(peers):
+            return peers[int(selection)-1]['name']
+        print('Choose one of the listed clients.')
+
+
+def display_connected_clients(info, now=None):
+    """Reference display, populated from public wg fields on client-wg0 only.
+
+    The original wg-json scans all interfaces and includes private server keys.
+    Targeted wg show queries give the same display fields without that exposure.
+    """
+    now = int(time.time()) if now is None else now
+    border = '+--------------------+-------------------+----------------------------+-----------------------+---------------------+'
+    print(border)
+    print('| Client IP          | Last Handshake    | Status                     | Endpoint              | Data Transferred    |')
+    print(border)
+    for peer in info['peers']:
+        age = peer['last_handshake_age_seconds']
+        handshake = ('Never' if age is None else
+                     datetime.fromtimestamp(now-age, timezone.utc).strftime('%Y/%m/%d %H:%M'))
+        state = 'Never Connected' if age is None else ('Connected' if age < 240 else 'Disconnected')
+        endpoint = peer.get('endpoint') or 'Not set'
+        transferred = (peer['rx_bytes'] + peer['tx_bytes']) // 1048576
+        print(f"| {peer['ip'] + '/32':<18} | {handshake:<17} | {state:<26} | {endpoint:<21} | {str(transferred) + ' MB':<19} |")
+    print(border)
+    print('Connected = handshake within 4 minutes; it does not prove current reachability.')
+    if not info['consistent']:
+        print('Configured and live peers: DIFFERENT OR OFFLINE')
+
+
+def show_qr(manager, name):
+    profile = manager.profile(name)
+    try:
+        subprocess.run(['qrencode', '-t', 'ansiutf8', '-l', 'L'], input=profile, text=True, check=True)
+    except FileNotFoundError as exc:
+        raise ManagerError('Install qrencode to display a QR code') from exc
+
+
+def new_client_wizard(manager):
+    print('\nClient configuration\n')
+    print("The client name must consist of alphanumeric character(s). It may also include underscores or dashes and can't exceed 15 chars.")
+    peers = manager.status()['peers']
+    while True:
+        name = input('Client name: ').strip()
+        if not NAME.fullmatch(name) or len(name) > 15:
+            print('Use 1-15 characters, starting with a letter or digit.'); continue
+        if any(p['name'].lower() == name.lower() for p in peers):
+            print('A client with the specified name was already created, please choose another name.'); continue
+        break
+    suggested = manager.next_address()
+    base, octet = suggested.rsplit('.', 1)
+    while True:
+        value = input(f'Client WireGuard IPv4: {base}. [{octet}]: ').strip()
+        address = suggested if not value else (base+'.'+value if '.' not in value else value)
+        if valid_peer_ip(address) and address not in {p['ip'] for p in peers}:
+            break
+        print('Invalid or already reserved client IPv4; choose another address.')
+    while True:
+        full = input('Route all IPv4 Internet through the VPS? [y/N]: ').strip().lower()
+        if full in ('', 'y', 'yes', 'n', 'no'):
+            break
+        print("Invalid input. Please enter 'y' or 'n'.")
+    try:
+        endpoint = manager.endpoint()
+    except ManagerError:
+        endpoint = manager.endpoint(input('VPS endpoint host:port: ').strip())
+    peer, path = manager.add(name, address, 'full' if full in ('y', 'yes') else 'split', endpoint)
+    if shutil.which('qrencode'):
+        print('\nHere is your client config file as a QR Code:\n')
+        try:
+            show_qr(manager, peer['name'])
+        except (ManagerError, OSError, subprocess.SubprocessError):
+            print('Client created; QR display failed. Use the saved profile or try the QR menu again.', file=sys.stderr)
+    print(f'Your client config file is in {path}')
+    print('LAN access is disabled. Enable it per client and in the global OMR LAN gate when required.')
+
+
+def interactive_menu(manager):
+    # Safe legacy migration also covers an older installation without a registry.
+    # initialize refuses to recreate a lost registry or change existing keys.
+    manager.initialize()
+    print('Welcome to OMR return-to-home!')
+    print('It looks like WireGuard is already installed.')
+    try:
+        while True:
+            print('\nWhat do you want to do?')
+            for number, label in enumerate(MENU_OPTIONS, 1):
+                print(f'   {number}) {label}')
+            choice = input(f'Select an option [1-{len(MENU_OPTIONS)}]: ').strip()
+            try:
+                if choice == '1':
+                    new_client_wizard(manager)
+                elif choice == '2':
+                    list_clients(manager.status()['peers'])
+                elif choice == '4':
+                    display_connected_clients(manager.status())
+                elif choice == '11':
+                    manager.recover(); print('Pending peer changes recovered; affected clients are disabled.')
+                elif choice == '12':
+                    return 0
+                elif choice in ('3', '5', '6', '7', '8', '9', '10'):
+                    prompt = ('Select the existing client you want to revoke' if choice == '3'
+                              else 'Select the existing client you want to manage')
+                    name = select_client(manager, prompt)
+                    if name is None:
+                        continue
+                    if choice == '3':
+                        if input(f'Revoke {name}? [y/N]: ').strip().lower() in ('y', 'yes'):
+                            manager.disable(name, remove=True); print('Client revoked.')
+                    elif choice == '5':
+                        sys.stdout.write(manager.profile(name))
+                    elif choice == '6':
+                        show_qr(manager, name)
+                    elif choice == '7':
+                        manager.disable(name); print('Client disabled.')
+                    elif choice == '8':
+                        manager.enable(name); print('Client enabled.')
+                    else:
+                        peer = manager.set_lan(name, choice == '9')
+                        print('LAN permission saved. The global OMR LAN gate must also be enabled and the tunnel must be ready.'
+                              if peer['lan'] else 'LAN permission revoked.')
+                else:
+                    print('Choose one of the listed options.')
+            except (ManagerError, OSError, ValueError, subprocess.SubprocessError) as exc:
+                print(str(exc) if isinstance(exc, ManagerError) else
+                      'Operation failed; check WireGuard service and firewall.', file=sys.stderr)
+    except (EOFError, KeyboardInterrupt):
+        print(); return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Manage OMR remote WireGuard clients')
+    parser = argparse.ArgumentParser(prog='omr-rth', description='Manage OMR return-to-home WireGuard clients')
     commands = parser.add_subparsers(dest='command', required=True)
     ini=commands.add_parser('init'); ini.add_argument('--defer-firewall',action='store_true')
+    ini.add_argument('--default-server-mtu',action='store_true',help='installer: persist MTU 1320 on client-wg0 only if absent')
     add=commands.add_parser('add'); add.add_argument('name'); add.add_argument('--ip'); add.add_argument('--full',action='store_true'); add.add_argument('--endpoint')
     for command in ('disable','enable','remove','show','qr'):
         p=commands.add_parser(command); p.add_argument('name')
     lan=commands.add_parser('lan'); lan.add_argument('name'); lan.add_argument('permission',choices=('allow','deny'))
     status=commands.add_parser('status'); status.add_argument('--json',action='store_true')
     commands.add_parser('recover')
+    commands.add_parser('menu')
+    commands.add_parser('list')
+    commands.add_parser('connected')
     args=parser.parse_args()
     if os.geteuid()!=0:
         print('Run as root.',file=sys.stderr); return 1
     manager=Manager()
     try:
-        if args.command=='init':
-            data=manager.initialize(args.defer_firewall); print(f"Initialized {len(data['peers'])} existing clients.")
+        if args.command=='menu':
+            return interactive_menu(manager)
+        elif args.command=='list':
+            list_clients(manager.status()['peers'])
+        elif args.command=='connected':
+            display_connected_clients(manager.status())
+        elif args.command=='init':
+            data=manager.initialize(args.defer_firewall,args.default_server_mtu); print(f"Initialized {len(data['peers'])} existing clients.")
         elif args.command=='add':
             peer,path=manager.add(args.name,args.ip,'full' if args.full else 'split',args.endpoint)
             print(f"Added {peer['name']} ({peer['ip']}); LAN disabled. Profile: {path}")
@@ -691,9 +1010,7 @@ def main():
         elif args.command=='recover':manager.recover();print('Pending peer changes recovered; affected clients are disabled.')
         elif args.command=='show':sys.stdout.write(manager.profile(args.name))
         elif args.command=='qr':
-            profile=manager.profile(args.name)
-            try:subprocess.run(['qrencode','-t','ansiutf8','-l','L'],input=profile,text=True,check=True)
-            except FileNotFoundError as exc:raise ManagerError('Install qrencode to display a QR code') from exc
+            show_qr(manager,args.name)
     except (ManagerError,OSError,ValueError,subprocess.SubprocessError) as exc:
         # Report only deliberately sanitized errors; avoid command output and keys.
         print(str(exc) if isinstance(exc,ManagerError) else 'Operation failed; check WireGuard service and firewall.',file=sys.stderr)

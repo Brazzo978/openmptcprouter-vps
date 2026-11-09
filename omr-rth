@@ -1,0 +1,17 @@
+#!/bin/bash
+# Return-to-home management of the existing OMR client-wg0 interface.
+set -u
+umask 077
+helper=/usr/local/sbin/omr_wg_manager.py
+if [ "$EUID" -ne 0 ]; then
+    printf '%s\n' 'Run this command as root.' >&2
+    exit 1
+fi
+if [ ! -r "$helper" ]; then
+    printf '%s\n' 'The OMR return-to-home manager backend is missing.' >&2
+    exit 1
+fi
+if [ "$#" -eq 0 ]; then
+    exec python3 "$helper" menu
+fi
+exec python3 "$helper" "$@"

@@ -301,7 +301,7 @@ def inner(root, names):
 def outer(report_path=None):
     if os.geteuid() or any(not shutil.which(x) for x in ('ip', 'nft', 'wg', 'python3')):
         raise RuntimeError('requires root and ip, nft, wg and python3')
-    sources = ('omr_wg_manager.py', 'omr-wg-manager', 'wg-remote-lan-route',
+    sources = ('omr_wg_manager.py', 'omr-rth', 'omr-wg-manager', 'wg-remote-lan-route',
                'nftables/omr.nft', 'nftables/omr-vars.nft', 'debian9-x86_64.sh',
                'tests/test_omr_wg_manager.py', 'tests/run_omr_wg_netns.py')
     digests = {path:hashlib.sha256((REPO/path).read_bytes()).hexdigest() for path in sources}
@@ -317,7 +317,10 @@ def outer(report_path=None):
                 ns(name, 'ip', 'link', 'set', 'lo', 'up')
             def pair(left, right, ldev, rdev, index):
                 x, y = 'w' + token + str(index) + 'a', 'w' + token + str(index) + 'b'
-                host_links.extend([x, y]); run(['ip', 'link', 'add', x, 'type', 'veth', 'peer', 'name', y])
+                run(['ip', 'link', 'add', x, 'type', 'veth', 'peer', 'name', y])
+                # Track ownership only after creation succeeds: a random-name
+                # collision must never authorize deleting an existing link.
+                host_links.extend([x, y])
                 run(['ip', 'link', 'set', x, 'netns', names[left]])
                 run(['ip', 'link', 'set', y, 'netns', names[right]])
                 ns(names[left], 'ip', 'link', 'set', x, 'name', ldev)

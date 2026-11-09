@@ -21,27 +21,34 @@ For manual preparation, extract the release archive and run `./run-vps-3k.sh pre
 - Native MQVPN **0.16.2-3k2**, compiled FEC capability and LAN-prefix handling. FEC configuration is independent from compiled capability. The primary router defaults to **10.255.220.2** when available; explicit addresses and other users are preserved.
 - Profiles API v2, transport/proxy coordination, confirmation/rollback and forwarding/WireGuard target updates for MQVPN, Glorytun TCP and No tunnel. Use the paired client for the profile UI.
 - Independent Xray TCP reverse forwarding, native VPN forwarding, authenticated diagnostics with sensitive values redacted, and the existing removal of VPS router-backup endpoints.
-- A Bash WireGuard client manager with individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
+- An interactive return-to-home WireGuard client manager with individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
 
 ## WireGuard clients
 
-Run `omr-wg-manager` as root for the menu. Scriptable examples:
+**Unreleased source candidate:** the `omr-rth` command and guided menu below apply
+after installing this source candidate or the next package containing it. The
+published 0.1164-3K archive linked above is unchanged and still uses
+`omr-wg-manager`; this CLI feature does not change frozen labels or package versions.
+
+Run `omr-rth` as root for the guided menu. The installation client is listed first, followed by existing additional clients. The previous `omr-wg-manager` command remains an alias. Scriptable examples:
 
 ```sh
-omr-wg-manager status
-omr-wg-manager add phone
-omr-wg-manager add laptop --full
-omr-wg-manager lan phone allow
-omr-wg-manager disable phone
-omr-wg-manager enable phone
-omr-wg-manager remove phone
+omr-rth status
+omr-rth add phone
+omr-rth add laptop --full
+omr-rth lan phone allow
+omr-rth disable phone
+omr-rth enable phone
+omr-rth remove phone
 ```
 
 `show NAME` and `qr NAME` deliberately display private profile material. Use a private terminal; `qr` requires `qrencode`. See [the manager guide](docs/WIREGUARD-REMOTE-MANAGER.md) for export, migration and recovery details.
 
+RTH profiles default to MTU **1320** and keepalive **25 seconds**. Newly generated profiles preserve explicit values inherited from the installation profile, including keepalive `0`/`off`. Existing client profiles and keys are preserved.
+
 New split profiles route `10.255.0.0/16` and permit only the router GUI on its current tunnel address, TCP 80/443. New clients cannot access LAN devices by default. IPv4 Internet through the VPS is available with `--full` / `AllowedIPs = 0.0.0.0/0`, without granting LAN access.
 
-LAN access requires **both** `omr-wg-manager lan NAME allow` and the router's global checkbox, or `wg-remote-lan-route --lan-access allow` on the VPS. Disabling either blocks existing LAN exchanges as well as new connections. Split profiles must also include the synchronized LAN subnet; re-export after enabling it. Existing legacy clients retain their documented migration behavior. No tunnel intentionally suspends tunnel-based router GUI/LAN access; manage that transition from the LAN or an independent path.
+LAN access requires **both** `omr-rth lan NAME allow` and the router's global checkbox, or `wg-remote-lan-route --lan-access allow` on the VPS. Disabling either blocks existing LAN exchanges as well as new connections. Split profiles must also include the synchronized LAN subnet; re-export after enabling it. Existing legacy clients retain their documented migration behavior. No tunnel intentionally suspends tunnel-based router GUI/LAN access; manage that transition from the LAN or an independent path.
 
 ## Validation and limits
 
