@@ -3,7 +3,7 @@
 The VPS 0.1164-3K archive refreshed on **2026-11-09** includes `omr-rth`
 and this guided menu. Earlier downloads used `omr-wg-manager`; the old command
 remains a compatibility alias. The refreshed archive includes admin API
-**0.18+20261030-3k8**, while the frozen kernel and VPN binaries are unchanged.
+**0.18+20261030-3k9**, while the frozen kernel and VPN binaries are unchanged.
 
 This manager targets VPS 0.1164-3K, paired with client 0.64.3-3K.
 It controls the existing VPS `client-wg0` return-home
@@ -64,10 +64,14 @@ VPS command requires no client firmware rebuild. An older tooltip can still
 refer to `omr-wg-manager`; that command remains an alias.
 
 The client-side fix for changing LAN addresses stored in CIDR form with a
-retained netmask was committed after the published v0.64.3 images. It is a
-separate hotfix/rebuild requirement for that scenario; updating the VPS cannot
-change existing client firmware. The refreshed VPS includes the server-side
-route-retirement correction. See [LAN subnet synchronization](LAN-SUBNET-SYNC.md).
+retained netmask was committed after the published v0.64.3 images and is
+scheduled for v0.64.4-3K. API **3k9** provides backward compatibility now: it
+normalizes the old `IPv4/prefix/retained-mask` payload after validating both
+suffixes. The explicit CIDR prefix wins over the stale retained mask. This
+specific scenario therefore needs no v0.64.3 rebuild when paired with 3k9.
+Malformed JSON or other client-side collector issues are outside this narrow
+compatibility parser. The VPS also retires obsolete LAN routes. See
+[LAN subnet synchronization](LAN-SUBNET-SYNC.md).
 
 On 2026-11-09 a temporary real WireGuard peer on an existing VPS completed a
 handshake and reached LuCI over HTTP and HTTPS on the MQVPN router tunnel IP

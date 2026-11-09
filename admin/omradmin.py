@@ -6135,8 +6135,34 @@ def wan(*, wanips: Wanips, current_user: User = Depends(get_current_user)):
     #modif_config_user(current_user.username,{'wanips': wanip})
     return {'result': 'done', 'reason': 'changes applied', 'route': 'wan'}
 
+def _normalize_legacy_lan_addresses(addresses):
+    """Accept the old collector's IPv4/prefix/retained-mask wire format."""
+    normalized = []
+    for raw in addresses:
+        value = raw
+        if raw.count('/') == 2:
+            address, prefix, retained_mask = raw.split('/')
+            if not re.fullmatch(r'(?:0|[1-9][0-9]?)', prefix):
+                raise ValueError('Invalid legacy LAN prefix')
+            if not re.fullmatch(r'[0-9.]+', retained_mask):
+                raise ValueError('Invalid retained LAN netmask')
+            # A valid CIDR suffix is authoritative, as on the fixed client.
+            # The stale UCI netmask must still be a valid IPv4 mask; arbitrary
+            # trailing fields are never silently discarded.
+            ipaddress.IPv4Network('0.0.0.0/' + retained_mask)
+            value = address + '/' + prefix
+        ipaddress.IPv4Interface(value)
+        normalized.append(value)
+    return normalized
+
+
 class Lanips(BaseModel):
     lanips: List[str] = []
+
+    @field_validator('lanips')
+    @classmethod
+    def normalize_legacy_addresses(cls, value):
+        return _normalize_legacy_lan_addresses(value)
 
 
 def _remove_obsolete_lan_routes(previous_lanips, previous_user, config):

@@ -12,9 +12,11 @@ Included changes since the original archive:
 - The previous `omr-wg-manager` command is a compatibility alias.
 - Default MTU 1320 and keepalive 25 for new configuration; explicit inherited
   values and existing profiles/keys are preserved.
-- Admin API `0.18+20261030-3k8` retires obsolete LAN prefixes after an accepted
+- Admin API `0.18+20261030-3k9` retires obsolete LAN prefixes after an accepted
   subnet change, limited to the previous route and matching tunnel gateway and
-  interface. The client-side CIDR collector correction is a separate client fix.
+  interface. It also validates and normalizes the specific legacy client
+  `IPv4/prefix/retained-mask` payload, avoiding a v0.64.3 rebuild for that case.
+  The definitive client collector correction is scheduled for v0.64.4-3K.
 
 The kernel, headers, frozen 21 OMR packages, three helper artifacts, MQVPN
 version, and existing profile/firewall features are unchanged. Their SHA-256

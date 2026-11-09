@@ -1,6 +1,6 @@
 # OpenMPTCProuter VPS 0.1164-3K
 
-Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The archive refreshed on **2026-11-09** includes `omr-rth` and admin API **0.18+20261030-3k8**. The kernel and frozen VPN package set are unchanged.
+Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The archive refreshed on **2026-11-09** includes `omr-rth` and admin API **0.18+20261030-3k9**. The kernel and frozen VPN package set are unchanged.
 
 ## Install
 
@@ -22,7 +22,7 @@ For manual preparation, extract the release archive and run `./run-vps-3k.sh pre
 - Profiles API v2, transport/proxy coordination, confirmation/rollback and forwarding/WireGuard target updates for MQVPN, Glorytun TCP and No tunnel. Use the paired client for the profile UI.
 - Independent Xray TCP reverse forwarding, native VPN forwarding, authenticated diagnostics with sensitive values redacted, and the existing removal of VPS router-backup endpoints.
 - The `omr-rth` guided return-to-home WireGuard manager, with the installation client first, add/list/remove, connected-client display, individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
-- Retirement of obsolete router LAN routes after an accepted subnet change, constrained to the previous prefix and the same VPN gateway/interface. CIDR-form LAN addresses also require the paired client collector fix documented in [LAN subnet synchronization](docs/LAN-SUBNET-SYNC.md).
+- Retirement of obsolete router LAN routes after an accepted subnet change, constrained to the previous prefix and the same VPN gateway/interface. API 3k9 also validates and normalizes the legacy double-mask LAN payload; see [LAN subnet synchronization](docs/LAN-SUBNET-SYNC.md).
 
 ## WireGuard clients
 
@@ -40,9 +40,10 @@ Using `AllowedIPs = 0.0.0.0/0` sends IPv4 Internet through the VPS but does not
 unlock the LAN. See [RTH access behavior and setup](docs/WIREGUARD-REMOTE-MANAGER.md#access-the-router-after-connecting).
 
 The published **v0.64.3-3K client is compatible with this RTH manager** and its
-unchanged remote-access API. Its previously published images do not include
-the later client CIDR LAN-collector hotfix; that separate subnet-change fix
-requires a client hotfix or rebuild. Updating the VPS does not replace firmware.
+unchanged remote-access API. API **3k9** also accepts the old client's specific
+`IPv4/prefix/retained-mask` LAN payload, so that subnet-change case no longer
+requires a client rebuild. The source-level client collector correction is
+scheduled for v0.64.4-3K. Updating the VPS does not replace existing firmware.
 
 The archive refreshed on **2026-11-09** includes the `omr-rth` command and
 guided menu below. Earlier downloads used `omr-wg-manager`.

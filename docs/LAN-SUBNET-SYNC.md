@@ -46,7 +46,7 @@ For `10.1.1.1/23`, the normalized network is **10.1.0.0/23**, covering
 ## Packaging status
 
 The VPS 0.1164 archive refreshed on 2026-11-09 includes this server correction
-in admin package **0.18+20261030-3k8**, with matching installer/preparation
+in admin package **0.18+20261030-3k9**, with matching installer/preparation
 version checks. The original targeted hotfix on the affected VPS patched the
 Python source directly and still reports 3k7; its deployment evidence records
 the source hash. Frozen kernel and VPN binaries are unchanged.
@@ -54,3 +54,19 @@ the source hash. Frozen kernel and VPN binaries are unchanged.
 The client collector fix is a separate source change and installed hotfix.
 Updating the VPS archive does not add that client-side correction to the
 previously published 0.64.3 firmware images.
+
+## Backward compatibility for existing clients
+
+API **3k9** validates and normalizes the specific old collector payload
+`10.1.1.1/23/255.255.254.0` to `10.1.1.1/23` before the `/lan` handler runs.
+The explicit prefix is authoritative even if the retained UCI mask differs,
+matching the corrected client's behavior. Invalid IPv4 addresses, prefixes,
+noncontiguous masks and extra suffixes are rejected with HTTP 422 before
+configuration is modified. Normal CIDR and dotted-mask payloads are preserved.
+
+This compatibility bridge avoids rebuilding v0.64.3 for the reported double
+mask issue. The definitive client collector correction remains scheduled for
+v0.64.4-3K. It also addresses other client collector cases; the VPS bridge
+cannot repair invalid JSON, an omitted LAN address or the client's comparison
+of its unnormalized payload against the normalized server response. Old clients
+may therefore repeat an otherwise safe LAN synchronization until updated.
