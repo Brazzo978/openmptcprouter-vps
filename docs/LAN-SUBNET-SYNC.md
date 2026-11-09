@@ -45,9 +45,12 @@ For `10.1.1.1/23`, the normalized network is **10.1.0.0/23**, covering
 
 ## Packaging status
 
-These are source changes and a targeted installed hotfix. Published client
-0.64.3 and VPS 0.1164 archives remain unchanged. The installed admin package
-still reports 3k7 because this repair patched its Python source directly;
-deployment evidence records the source hash. A future VPS package must bump its
-admin revision and update the installer/preparation version checks together.
-No new release, frozen binary replacement or firmware rebuild is claimed here.
+The VPS 0.1164 archive refreshed on 2026-11-09 includes this server correction
+in admin package **0.18+20261030-3k8**, with matching installer/preparation
+version checks. The original targeted hotfix on the affected VPS patched the
+Python source directly and still reports 3k7; its deployment evidence records
+the source hash. Frozen kernel and VPN binaries are unchanged.
+
+The client collector fix is a separate source change and installed hotfix.
+Updating the VPS archive does not add that client-side correction to the
+previously published 0.64.3 firmware images.
