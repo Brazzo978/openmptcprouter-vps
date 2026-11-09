@@ -1,6 +1,6 @@
 # OpenMPTCProuter VPS 0.1164-3K
 
-Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The kernel and binary package set remain frozen; the admin API is **0.18+20261030-3k7**.
+Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The archive refreshed on **2026-11-09** includes `omr-rth` and admin API **0.18+20261030-3k8**. The kernel and frozen VPN package set are unchanged.
 
 ## Install
 
@@ -21,14 +21,13 @@ For manual preparation, extract the release archive and run `./run-vps-3k.sh pre
 - Native MQVPN **0.16.2-3k2**, compiled FEC capability and LAN-prefix handling. FEC configuration is independent from compiled capability. The primary router defaults to **10.255.220.2** when available; explicit addresses and other users are preserved.
 - Profiles API v2, transport/proxy coordination, confirmation/rollback and forwarding/WireGuard target updates for MQVPN, Glorytun TCP and No tunnel. Use the paired client for the profile UI.
 - Independent Xray TCP reverse forwarding, native VPN forwarding, authenticated diagnostics with sensitive values redacted, and the existing removal of VPS router-backup endpoints.
-- An interactive return-to-home WireGuard client manager with individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
+- The `omr-rth` guided return-to-home WireGuard manager, with the installation client first, add/list/remove, connected-client display, individual permissions, IPv4 full-tunnel Internet support and a separate global LAN gate.
+- Retirement of obsolete router LAN routes after an accepted subnet change, constrained to the previous prefix and the same VPN gateway/interface. CIDR-form LAN addresses also require the paired client collector fix documented in [LAN subnet synchronization](docs/LAN-SUBNET-SYNC.md).
 
 ## WireGuard clients
 
-**Unreleased source candidate:** the `omr-rth` command and guided menu below apply
-after installing this source candidate or the next package containing it. The
-published 0.1164-3K archive linked above is unchanged and still uses
-`omr-wg-manager`; this CLI feature does not change frozen labels or package versions.
+The archive refreshed on **2026-11-09** includes the `omr-rth` command and
+guided menu below. Earlier downloads used `omr-wg-manager`.
 
 Run `omr-rth` as root for the guided menu. The installation client is listed first, followed by existing additional clients. The previous `omr-wg-manager` command remains an alias. Scriptable examples:
 
@@ -52,6 +51,8 @@ LAN access requires **both** `omr-rth lan NAME allow` and the router's global ch
 
 ## Validation and limits
 
-The API/kernel/frozen payload was clean-installed on Debian 13 and rebooted before the paired tests. Subsequent tests with the actual VMware r7 client passed native/independent Xray forwarding (17 checks), WireGuard GUI/full IPv4 Internet/peer lifecycle and a distinct Windows LAN permission/revocation matrix (28), and all six client profiles including real WireGuard GUI retargeting. The frozen hashes, installed package versions and service health were rechecked. The 0.1164 archive preserves those binaries; its release labels, source packaging and preparation are verified separately.
+The API/kernel/frozen payload was clean-installed on Debian 13 and rebooted before the paired tests. Subsequent tests with the actual VMware r7 client passed native/independent Xray forwarding (17 checks), WireGuard GUI/full IPv4 Internet/peer lifecycle and a distinct Windows LAN permission/revocation matrix (28), and all six client profiles including real WireGuard GUI retargeting. The frozen hashes, installed package versions and service health were rechecked.
+
+The 2026-11-09 refresh adds the LAN route-retirement API fix and guided manager. The manager passed 92 automated tests, 41 isolated real WireGuard/firewall traffic checks, and 14 deployment checks on an existing VPS. The LAN fix passed helper/kernel route tests and live subnet-change verification. Packaging preparation, API package contents, frozen hashes and kernel checks are verified separately; this refreshed archive has not been clean-installed from scratch.
 
 The x86 lab does not establish physical multi-WAN throughput, IPv6, mobile QR onboarding or arbitrary legacy upgrades. On the tested VMnet2 NAT path, MPTCP options were lost between the client and VPS; the other WAN negotiated MPTCP correctly. Source patches 030/040/050 are retained for MQVPN client maintenance; the frozen VPS server binary remains 0.16.2-3k2.

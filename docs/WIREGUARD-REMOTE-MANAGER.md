@@ -1,9 +1,9 @@
 # OMR return-to-home manager (0.1164-3K)
 
-**Unreleased source candidate:** the `omr-rth` rename and guided menu apply after
-installing this source candidate or the next package containing it. The existing
-published VPS 0.1164-3K archive is unchanged and still uses `omr-wg-manager`.
-No frozen release label or package version is changed by this CLI feature.
+The VPS 0.1164-3K archive refreshed on **2026-11-09** includes `omr-rth`
+and this guided menu. Earlier downloads used `omr-wg-manager`; the old command
+remains a compatibility alias. The refreshed archive includes admin API
+**0.18+20261030-3k8**, while the frozen kernel and VPN binaries are unchanged.
 
 This manager targets VPS 0.1164-3K, paired with client 0.64.3-3K.
 It controls the existing VPS `client-wg0` return-home
