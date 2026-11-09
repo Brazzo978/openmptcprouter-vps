@@ -6138,6 +6138,44 @@ def wan(*, wanips: Wanips, current_user: User = Depends(get_current_user)):
 class Lanips(BaseModel):
     lanips: List[str] = []
 
+
+def _remove_obsolete_lan_routes(previous_lanips, previous_user, config):
+    """Remove only this router's former main-table routes over an OMR VPN."""
+    try:
+        previous = {ipaddress.IPv4Network(raw, strict=False) for raw in previous_lanips}
+        desired = {ipaddress.IPv4Network(raw, strict=False)
+                   for user in config.get('users', [{}])[0].values()
+                   for raw in user.get('lanips', [])}
+        stale = previous - desired
+        if not stale or not previous_user.get('vpnremoteip'):
+            return True
+        remote = str(ipaddress.IPv4Address(previous_user['vpnremoteip']))
+        routes = subprocess.run(
+            ['ip', '-j', '-4', 'route', 'show', 'table', 'main'],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        for route in json.loads(routes.stdout):
+            device = route.get('dev', '')
+            if (route.get('gateway') != remote or
+                    not re.fullmatch(r'(?:mqvpn|tun|gt-tun|gt-udp-tun|dsvpn|wg)[A-Za-z0-9_.-]*', device)):
+                continue
+            destination = route.get('dst', '0.0.0.0/0')
+            if destination == 'default':
+                continue
+            network = ipaddress.IPv4Network(destination, strict=False)
+            if network.prefixlen == 0 or network not in stale:
+                continue
+            subprocess.run(
+                ['ip', '-4', 'route', 'del', str(network), 'via', remote,
+                 'dev', device, 'table', 'main'],
+                check=True, capture_output=True, text=True, timeout=5,
+            )
+        return True
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
+            subprocess.SubprocessError):
+        LOG.exception('Could not retire previous router LAN routes')
+        return False
+
 # Set user lan config
 @app.post('/lan', summary="Set current user LAN IPs")
 def lan(*, lanconfig: Lanips, current_user: User = Depends(get_current_user)):
@@ -6152,8 +6190,8 @@ def lan(*, lanconfig: Lanips, current_user: User = Depends(get_current_user)):
             raise HTTPException(status_code=422, detail='Invalid LAN route for MQVPN') from exc
     with open('/etc/openmptcprouter-vps-admin/omr-admin-config.json') as f:
         previous_config = json.load(f)
-    previous_lanips = previous_config.get('users', [{}])[0].get(
-        current_user.username, {}).get('lanips', [])
+    previous_user = previous_config.get('users', [{}])[0].get(current_user.username, {})
+    previous_lanips = previous_user.get('lanips', [])
 
     LOG.debug("modif_config_user for lanip")
     modif_config_user(current_user.username, {'lanips': lanips})
@@ -6205,6 +6243,9 @@ def lan(*, lanconfig: Lanips, current_user: User = Depends(get_current_user)):
             LOG.error('MQVPN LAN route registration failed for %s', current_user.username)
             return {'result': 'warning', 'reason': 'MQVPN LAN routes saved but not active',
                     'route': 'lan'}
+    if not _remove_obsolete_lan_routes(previous_lanips, previous_user, omr_config_data):
+        return {'result': 'warning', 'reason': 'LAN saved but previous route cleanup failed',
+                'route': 'lan'}
     return {'result': 'done', 'reason': 'changes applied', 'route': 'lan'}
 
 class VPNips(BaseModel):
