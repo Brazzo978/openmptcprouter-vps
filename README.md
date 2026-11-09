@@ -26,6 +26,24 @@ For manual preparation, extract the release archive and run `./run-vps-3k.sh pre
 
 ## WireGuard clients
 
+After activating a remote WireGuard profile, open the router's current tunnel
+address in your browser. With the standard primary MQVPN router this is
+**https://10.255.220.2/** or **http://10.255.220.2/**; log in with the router's
+normal LuCI credentials. GUI access on TCP 80/443 works even with LAN access
+disabled. The router's LAN address (for example `10.1.1.1`) is a LAN destination
+and requires LAN permission, just like other LAN devices. Ping/SSH are not part
+of the default GUI-only permission.
+
+LAN access requires the router's **Allow remote WireGuard access to LAN**
+checkbox, the individual client grant in `omr-rth`, and matching client routes.
+Using `AllowedIPs = 0.0.0.0/0` sends IPv4 Internet through the VPS but does not
+unlock the LAN. See [RTH access behavior and setup](docs/WIREGUARD-REMOTE-MANAGER.md#access-the-router-after-connecting).
+
+The published **v0.64.3-3K client is compatible with this RTH manager** and its
+unchanged remote-access API. Its previously published images do not include
+the later client CIDR LAN-collector hotfix; that separate subnet-change fix
+requires a client hotfix or rebuild. Updating the VPS does not replace firmware.
+
 The archive refreshed on **2026-11-09** includes the `omr-rth` command and
 guided menu below. Earlier downloads used `omr-wg-manager`.
 
