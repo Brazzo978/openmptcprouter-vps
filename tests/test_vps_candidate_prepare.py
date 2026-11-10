@@ -13,7 +13,7 @@ import textwrap
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.18+20261030-3k9'
+VERSION = '0.18+20261030-3k10'
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def prepared_lab(tmp_path):
     (tmp_path / 'admin/build-3k-deb.py').write_text(textwrap.dedent('''\
         import hashlib, json, os, pathlib, sys
         output = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])
-        version = '0.18+20261030-3k9'
+        version = '0.18+20261030-3k10'
         mode = os.environ.get('FAKE_BUILD_MODE', 'ok')
         fields = {'Package':'omr-vps-admin', 'Version':version, 'Architecture':'all'}
         if mode == 'wrong_package': fields['Package'] = 'other'
@@ -61,7 +61,7 @@ def run_prepare(lab, mode):
                           cwd=path, env=env, text=True, capture_output=True)
 
 
-def test_prepares_only_verified_3k9(prepared_lab):
+def test_prepares_only_verified_3k10(prepared_lab):
     result = run_prepare(prepared_lab, 'ok')
     assert result.returncode == 0, result.stderr
     assert 'package prepared' in result.stdout
@@ -71,7 +71,7 @@ def test_prepares_only_verified_3k9(prepared_lab):
 @pytest.mark.parametrize('mode', ['stale_only', 'metadata_version', 'bad_sha', 'wrong_package', 'wrong_version', 'wrong_arch'])
 def test_rejects_stale_or_invalid_candidate(prepared_lab, mode):
     path, _ = prepared_lab
-    # A historical artifact must never make a missing 3k9 appear prepared.
+    # A historical artifact must never make a missing 3k10 appear prepared.
     (path / 'debian/omr-vps-admin_0.18+20261016-3k4_all.deb').write_text('old release')
     result = run_prepare(prepared_lab, mode)
     assert result.returncode != 0

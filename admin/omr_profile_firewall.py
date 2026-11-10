@@ -36,7 +36,12 @@ def render_fw_ports(config_data):
                     target = 'fd00::a0{:x}:2'.format(udata.get('userid', 0) or 0)
                 if not target:
                     continue
-                dnat_rules.append(f'{match} {proto} dport {port} dnat {"ip" if family == 4 else "ip6"} to {target} comment "{tag}"')
+                # Only traffic addressed to this VPS is a port forward.
+                # In particular a VPN client's DNS/HTTP request to an external
+                # server must not be redirected back into the OMR tunnel.
+                # A local-destination test also preserves hairpin access to
+                # a VPS address from a VPN client, unlike a WAN-only iif test.
+                dnat_rules.append(f'fib daddr type local {match} {proto} dport {port} dnat {"ip" if family == 4 else "ip6"} to {target} comment "{tag}"')
     return accept_rules, dnat_rules
 
 
@@ -47,9 +52,9 @@ def render_bulk_redirect(config_data):
         target = default_user.get('vpnremoteip', '')
         if target:
             for proto in ('tcp', 'udp'):
-                lines.append(f'meta nfproto ipv4 {proto} dport 1-64999 dnat ip to {target} comment "OMR bulk redirect {proto}"')
+                lines.append(f'fib daddr type local meta nfproto ipv4 {proto} dport 1-64999 dnat ip to {target} comment "OMR bulk redirect {proto}"')
     if config_data.get('bulk_redirect_v6'):
         target6 = 'fd00::a0{:x}:2'.format(default_user.get('userid', 0) or 0)
         for proto in ('tcp', 'udp'):
-            lines.append(f'meta nfproto ipv6 {proto} dport 1-64999 dnat ip6 to {target6} comment "OMR bulk redirect {proto}6"')
+            lines.append(f'fib daddr type local meta nfproto ipv6 {proto} dport 1-64999 dnat ip6 to {target6} comment "OMR bulk redirect {proto}6"')
     return lines

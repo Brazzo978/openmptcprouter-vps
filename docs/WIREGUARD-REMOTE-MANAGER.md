@@ -3,7 +3,7 @@
 The VPS 0.1164-3K archive refreshed on **2026-11-09** includes `omr-rth`
 and this guided menu. Earlier downloads used `omr-wg-manager`; the old command
 remains a compatibility alias. The refreshed archive includes admin API
-**0.18+20261030-3k9**, while the frozen kernel and VPN binaries are unchanged.
+**0.18+20261030-3k10**, while the frozen kernel and VPN binaries are unchanged.
 
 This manager targets VPS 0.1164-3K, paired with client 0.64.3-3K.
 It controls the existing VPS `client-wg0` return-home

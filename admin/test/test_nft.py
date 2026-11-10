@@ -75,7 +75,7 @@ class TestRenderFwPorts:
         })
         _accept, dnat = omr_admin._render_fw_ports(config)
         assert len(dnat) == 1
-        assert dnat[0].startswith("meta nfproto ipv4 tcp dport 80 dnat ip to 10.255.220.6")
+        assert dnat[0].startswith("fib daddr type local meta nfproto ipv4 tcp dport 80 dnat ip to 10.255.220.6")
 
     def test_dnat_v6_synthesizes_ula_from_userid(self):
         config = _config({
@@ -85,7 +85,7 @@ class TestRenderFwPorts:
             },
         })
         _accept, dnat = omr_admin._render_fw_ports(config)
-        assert dnat == ['meta nfproto ipv6 tcp dport 80 dnat ip6 to fd00::a05:2 comment "OMR alice redirect http tcp"']
+        assert dnat == ['fib daddr type local meta nfproto ipv6 tcp dport 80 dnat ip6 to fd00::a05:2 comment "OMR alice redirect http tcp"']
 
     def test_dnat_without_known_target_is_skipped(self):
         # No vpnremoteip yet (router hasn't announced its tunnel IP) --
