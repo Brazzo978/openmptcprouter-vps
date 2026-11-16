@@ -1,0 +1,21 @@
+[Unit]
+Description=Read-only OMR dashboard telemetry collector
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/share/omr-admin/omr_dashboard.py --loop
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/omr-dashboard /run/omr-dashboard
+StateDirectory=omr-dashboard
+RuntimeDirectory=omr-dashboard
+StateDirectoryMode=0700
+RuntimeDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

@@ -36,6 +36,7 @@ from typing import List, Optional, Literal
 from functools import wraps
 import omr_profiles
 import omr_profile_firewall
+import omr_dashboard
 from shutil import move
 from enum import Enum
 from os import path
@@ -2651,7 +2652,7 @@ def create_access_token(*, data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(oauth2_scheme), request: Request = None):
     credentials_exception = HTTPException(
         status_code=HTTP_403_FORBIDDEN,
         detail="Could not validate credentials",
@@ -2680,6 +2681,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     if user.disabled:
         raise inactive_user_exception()
+    # A recent authenticated API contact is evidence of router activity, not
+    # proof that its data tunnel is established. Dashboard polling is excluded.
+    if request is not None and user.permissions != 'admin':
+        route = request.url.path
+        if route in ('/config', '/status') or route.startswith('/metrics'):
+            try:
+                omr_dashboard.note_contact(user.username, route)
+            except Exception:
+                # Telemetry must never interfere with the router's API path.
+                LOG.warning('Dashboard contact history unavailable')
     return user
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
@@ -2856,6 +2867,51 @@ except ImportError:
 @app.get("/")
 async def homepage():
     return "Welcome to OpenMPTCProuter Server part"
+
+
+_DASHBOARD_STATIC_DIR = '/usr/share/omr-admin/dashboard'
+if not path.isdir(_DASHBOARD_STATIC_DIR):
+    _DASHBOARD_STATIC_DIR = path.join(path.dirname(path.abspath(__file__)), 'dashboard')
+
+_DASHBOARD_HEADERS = {
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    ),
+}
+
+
+@app.get('/dashboard', include_in_schema=False)
+async def dashboard_redirect():
+    return RedirectResponse('/dashboard/', headers=_DASHBOARD_HEADERS)
+
+
+@app.get('/dashboard/', include_in_schema=False)
+async def dashboard_page():
+    # The public shell contains no telemetry; the data route is admin-only.
+    return FileResponse(path.join(_DASHBOARD_STATIC_DIR, 'index.html'),
+                        media_type='text/html', headers=_DASHBOARD_HEADERS)
+
+
+@app.get('/dashboard/assets/{filename}', include_in_schema=False)
+async def dashboard_asset(filename: str):
+    allowed = {'app.js': 'application/javascript', 'style.css': 'text/css'}
+    if filename not in allowed:
+        raise HTTPException(status_code=404, detail='Not found')
+    return FileResponse(path.join(_DASHBOARD_STATIC_DIR, filename),
+                        media_type=allowed[filename], headers=_DASHBOARD_HEADERS)
+
+
+@app.get('/dashboard/api/snapshot', summary='Read-only VPS dashboard snapshot')
+async def dashboard_snapshot(current_user: User = Depends(get_current_active_user)):
+    if current_user.permissions != 'admin':
+        raise HTTPException(status_code=403, detail='Administrator access required')
+    return JSONResponse(omr_dashboard.read_snapshot(), headers=_DASHBOARD_HEADERS)
 
 # Provide a method to create access tokens. The create_jwt()
 # function is used to actually generate the token

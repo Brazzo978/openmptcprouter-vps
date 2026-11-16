@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "generated_at": 1800000000,
+  "server": {"version":"3K example","kernel":"6.1.0-example","hostname":"example-vps","uptime_seconds":432123,"load":[0.12,0.24,0.19],"memory":{"total_bytes":4294967296,"available_bytes":2147483648},"mptcp":{"scheduler":"default","cc":"bbr","available_schedulers":["default"],"available_cc":["cubic","bbr"],"source":"procfs"}},
+  "clients": [{"id":"router-example","username":"router-example","state":"connected","last_seen_at":null,"last_connected_at":null,"last_disconnected_at":null,"tunnel":{"configured":"mqvpn","observed":"mqvpn","interface":"tun0","address":"10.0.0.2","state":"connected","scheduler":"minrtt","cc":"bbr","mtu":1420,"paths":[{"interface":"wan1","weight":50,"rtt_ms":22},{"interface":"wan2","weight":50,"rtt_ms":45}],"settings":{"fec_enable":true},"source":"mqvpn get_status"},"proxy":{"configured":"shadowsocks","observed":null,"state":"unknown"},"mptcp":{"scheduler":"default","cc":"bbr","source":"server kernel"},"lan_subnets":["192.168.1.0/24"],"rth":{"enabled":null,"lan_access_requested":true,"lan_access_effective":null},"settings":{}}],
+  "wireguard":{"interface":"client-wg0","state":"available","summary":{"global_lan_gate":true,"peer_count":2,"source":"registry and wireguard; recent handshake <= 240 seconds"},"peers":[{"id":"example-laptop","name":"example-laptop","address":"10.3.0.2","enabled":true,"connected":true,"last_handshake_at":1799999940,"rx_bytes":1048576,"tx_bytes":2097152,"lan_access_requested":true,"lan_access_effective":true},{"id":"example-phone","name":"example-phone","address":"10.3.0.3","enabled":true,"connected":null,"last_handshake_at":null,"rx_bytes":null,"tx_bytes":null,"lan_access_requested":false,"lan_access_effective":null}]},
+  "services":[{"name":"mqvpn","state":"active"},{"name":"wireguard","state":"unknown"}],
+  "events":[{"message":"Client connected","client":"router-example","timestamp":1799999900}],"warnings":[]
+}

@@ -399,6 +399,7 @@ def patch_env(request):
         return
     with (
         patch("builtins.open", side_effect=_mock_open),
+        patch.object(omr_admin.omr_dashboard, 'note_contact', return_value=True),
         patch("os.system", return_value=0),
         patch("subprocess.run", return_value=MagicMock(returncode=0)),
         patch("os.popen", side_effect=_ospopen_factory),

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>VPS Dashboard · OMR 3K</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23316ce8'/%3E%3Ccircle cx='28' cy='32' r='15' fill='none' stroke='white' stroke-width='7'/%3E%3Ctext x='40' y='49' fill='white' font-family='sans-serif' font-size='22' font-weight='bold'%3E3%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/dashboard/assets/style.css">
+  <script src="/dashboard/assets/app.js" defer></script>
+</head>
+<body>
+<div id="login-view" class="login-view">
+  <main class="login-card">
+    <div class="brand-mark">O<span>3</span></div>
+    <p class="eyebrow">OPENMPTCPROUTER 3K</p>
+    <h1>Welcome back</h1>
+    <p class="muted login-intro">Sign in to view your VPS and connection status.</p>
+    <form id="login-form">
+      <label for="username">Username</label><input id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button class="button primary login-button" type="submit">Sign in <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="login-note"><span aria-hidden="true">◈</span> Read-only monitoring · Administrator account required</p>
+  </main>
+</div>
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">O<span>3</span></div><div><strong>OMR 3K</strong><small>VPS DASHBOARD</small></div></div>
+    <div class="nav-label">MONITORING</div>
+    <nav aria-label="Dashboard sections">
+      <a href="#overview" class="nav-link active"><span aria-hidden="true">▦</span> Overview</a>
+      <a href="#clients" class="nav-link"><span aria-hidden="true">◫</span> OMR clients</a>
+      <a href="#wireguard" class="nav-link"><span aria-hidden="true">◇</span> Remote access</a>
+      <a href="#activity" class="nav-link"><span aria-hidden="true">◷</span> Activity</a>
+    </nav>
+    <div class="sidebar-bottom"><div class="readonly"><span class="readonly-icon">◈</span><div><strong>Read-only access</strong><small>Monitoring only</small></div></div><button id="logout" class="text-button">Sign out <span aria-hidden="true">↗</span></button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div><span class="breadcrumb">MONITORING <span>/</span> OVERVIEW</span><h1>VPS overview</h1><p class="muted">Your server and connections, at a glance.</p></div><div class="top-actions"><button id="theme" class="icon-button" type="button" aria-label="Switch color theme" title="Switch color theme">◐</button><button id="refresh" class="button secondary" type="button"><span aria-hidden="true">↻</span> Refresh</button><button id="mobile-logout" class="button secondary mobile-logout" type="button">Sign out</button></div></header>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <div class="status-line"><span><span id="live-dot" class="dot"></span><strong id="refresh-state">Connecting</strong><span class="separator">·</span><span id="updated">Waiting for data</span></span><span class="readonly-tag">◈ &nbsp; READ ONLY</span></div>
+    <section id="overview" aria-labelledby="overview-title"><div class="section-heading"><div><p class="eyebrow">SERVER HEALTH</p><h2 id="overview-title">Overview</h2></div><span id="server-name" class="subtle-pill">VPS</span></div><div id="metrics" class="metrics"></div>
+      <div class="overview-grid"><article class="card"><div class="card-heading"><div><p class="eyebrow">SYSTEM</p><h3>Server details</h3></div><span class="card-icon">▤</span></div><div id="server-details" class="detail-grid"></div></article><article class="card"><div class="card-heading"><div><p class="eyebrow">MULTIPATH TCP</p><h3>MPTCP configuration</h3></div><span class="card-icon">⌁</span></div><div id="mptcp-details" class="detail-grid"></div></article></div>
+      <article class="card services-card"><div class="card-heading"><div><p class="eyebrow">VPS SERVICES</p><h3>Service status</h3></div><span class="card-icon">▧</span></div><div id="services" class="service-list"></div></article>
+    </section>
+    <section id="clients" aria-labelledby="clients-title"><div class="section-heading"><div><p class="eyebrow">CONNECTIONS</p><h2 id="clients-title">OMR clients</h2><p class="muted section-description">Select a client to inspect its configuration and observed state.</p></div><span id="client-count" class="subtle-pill">— clients</span></div><div class="client-layout"><article class="card client-list-card"><div class="list-header"><span>CLIENT</span><span>STATE</span></div><div id="client-list"></div></article><article class="card client-detail"><div id="client-detail"></div></article></div></section>
+    <section id="wireguard" aria-labelledby="wireguard-title"><div class="section-heading"><div><p class="eyebrow">REMOTE ACCESS</p><h2 id="wireguard-title">WireGuard peers</h2><p class="muted section-description">A recent handshake is an observation, not proof of current connectivity.</p></div><span id="wg-state" class="subtle-pill">Unavailable</span></div><article class="card table-card"><div id="wg-summary" class="wg-summary"></div><div class="table-scroll"><table><thead><tr><th>PEER</th><th>ADDRESS</th><th>LAST HANDSHAKE</th><th>TRANSFER RX / TX</th><th>LAN ACCESS</th><th>HANDSHAKE</th></tr></thead><tbody id="peers"></tbody></table></div></article></section>
+    <section id="activity" aria-labelledby="activity-title"><div class="section-heading"><div><p class="eyebrow">HISTORY</p><h2 id="activity-title">Recent activity</h2><p class="muted section-description">Latest connection and service events available on this VPS.</p></div></div><article class="card"><div id="events" class="event-list"></div></article></section>
+    <footer>OMR 3K <span>·</span> VPS monitoring <span>·</span> Read only</footer>
+  </main>
+</div>
+</body></html>

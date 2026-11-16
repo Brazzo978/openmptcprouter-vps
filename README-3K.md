@@ -1,5 +1,9 @@
 # OpenMPTCProuter VPS 0.1164-3K
 
+Development candidate on this branch: API **3k11** adds the [informational VPS
+dashboard](docs/VPS-DASHBOARD.md), compatible with the 0.64.2/0.64.3 clients.
+It is separate from the previously published archive described below.
+
 Server release paired with [client v0.64.3-3K](https://github.com/Brazzo978/openmptcprouter/releases/tag/v0.64.3-3K). The tested platform is **Debian 13 amd64 with an x86-64-v3 CPU**. The archive refreshed on **2026-11-10** includes `omr-rth` and admin API **0.18+20261030-3k10**. The kernel and frozen VPN package set are unchanged.
 
 ## Install

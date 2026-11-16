@@ -27,6 +27,8 @@ systemctl daemon-reload
 systemctl enable omr-admin.service
 systemctl restart omr-admin.service
 systemctl enable --now omr-profile-recovery.timer
+systemctl enable --now omr-dashboard-collector.service
+systemctl restart omr-dashboard-collector.service
 
 
 db_stop

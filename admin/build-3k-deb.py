@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = "0.18+20261030-3k10"
+VERSION = "0.18+20261030-3k11"
 SOURCE_DATE_EPOCH = int(datetime(2026, 10, 30, tzinfo=timezone.utc).timestamp())
 ROOT = Path(__file__).resolve().parent
 SERVER = ROOT.parent if (ROOT.parent / "debian9-x86_64.sh").is_file() else ROOT.parent / "server"
@@ -30,6 +30,11 @@ def main():
             "omradmin.py": "usr/bin/omradmin.py",
             "omr_profiles.py": "usr/share/omr-admin/omr_profiles.py",
             "omr_profile_firewall.py": "usr/share/omr-admin/omr_profile_firewall.py",
+            "omr_dashboard.py": "usr/share/omr-admin/omr_dashboard.py",
+            "dashboard/index.html": "usr/share/omr-admin/dashboard/index.html",
+            "dashboard/style.css": "usr/share/omr-admin/dashboard/style.css",
+            "dashboard/app.js": "usr/share/omr-admin/dashboard/app.js",
+            "debian/omr-dashboard-collector.service": "lib/systemd/system/omr-dashboard-collector.service",
             "omr_profiles_watchdog.py": "usr/share/omr-admin/omr_profiles_watchdog.py",
             "debian/omr-profile-load-cc@.service": "lib/systemd/system/omr-profile-load-cc@.service",
             "debian/omr-profile-recovery.service": "lib/systemd/system/omr-profile-recovery.service",
@@ -83,6 +88,8 @@ Description: OpenMPTCProuter VPS API with 3K TCP XRay reverse forwarding
                     "source_sha256": hashlib.sha256((ROOT / "omradmin.py").read_bytes()).hexdigest(),
                     "profiles_source_sha256": hashlib.sha256((ROOT / "omr_profiles.py").read_bytes()).hexdigest(),
                     "profiles_firewall_source_sha256": hashlib.sha256((ROOT / "omr_profile_firewall.py").read_bytes()).hexdigest(),
+                    "dashboard_source_sha256": hashlib.sha256((ROOT / "omr_dashboard.py").read_bytes()).hexdigest(),
+                    "dashboard_assets_sha256": {name: hashlib.sha256((ROOT / 'dashboard' / name).read_bytes()).hexdigest() for name in ('index.html', 'style.css', 'app.js')},
                     "installed": False}
         (output / "omr-vps-admin-3k.json").write_text(json.dumps(metadata, indent=2) + "\n")
         print(json.dumps(metadata))

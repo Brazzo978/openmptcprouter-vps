@@ -2,6 +2,12 @@ omr-admin-config.json usr/share/omr-admin
 omr-admin-config.json etc/openmptcprouter-vps-admin
 omradmin.py usr/bin
 omr_profiles.py usr/share/omr-admin
+omr_profile_firewall.py usr/share/omr-admin
+omr_dashboard.py usr/share/omr-admin
+dashboard/index.html usr/share/omr-admin/dashboard
+dashboard/style.css usr/share/omr-admin/dashboard
+dashboard/app.js usr/share/omr-admin/dashboard
+debian/omr-dashboard-collector.service lib/systemd/system
 omr_profiles_watchdog.py usr/share/omr-admin
 debian/omr-profile-load-cc@.service lib/systemd/system
 debian/omr-profile-recovery.service lib/systemd/system
